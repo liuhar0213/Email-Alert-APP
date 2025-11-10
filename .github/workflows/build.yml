@@ -44,6 +44,11 @@
             pip install --upgrade pip
             pip install buildozer==1.5.0 cython==0.29.33
 
+        - name: Set Java 17 as default
+          run: |
+            echo "JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64" >> $GITHUB_ENV
+            echo "/usr/lib/jvm/temurin-17-jdk-amd64/bin" >> $GITHUB_PATH
+
         - name: Build APK with Buildozer
           run: yes | buildozer -v android debug
 
