@@ -743,16 +743,29 @@ class EmailAlertApp(App):
             print(f"[Desktop Alert] {title}: {message}")
 
     def vibrate_long(self):
-        """Vibrate for configured duration - aggressive method for vivo phones"""
+        """Vibrate for configured duration - ULTRA aggressive method for vivo lockscreen"""
         if not self.vibrator:
             return
 
         try:
-            print(f"[Vibrate] Starting {self.alert_duration}s AGGRESSIVE vibration for vivo")
+            print(f"[Vibrate] Starting {self.alert_duration}s ULTRA AGGRESSIVE vibration")
+            print(f"[Vibrate] Strategy: 200ms vibrate + 200ms sleep, wake lock EVERY cycle")
 
-            # Use aggressive loop-based vibration that repeatedly calls vibrate()
-            # This prevents vivo's power saving from stopping it
-            cycles = int(self.alert_duration / 0.5)  # Vibrate every 500ms
+            # ULTRA aggressive: vibrate every 200ms (not 500ms)
+            # This gives vivo NO time to suspend the vibration
+            cycle_duration = 0.2  # 200ms cycles
+            vibrate_duration = 180  # 180ms vibrate (leave 20ms gap)
+            cycles = int(self.alert_duration / cycle_duration)
+
+            # Get PowerManager for creating fresh wake locks
+            try:
+                activity = PythonActivity.mActivity
+                context = activity.getApplicationContext()
+                power_manager = context.getSystemService(Context.POWER_SERVICE)
+                print("[Vibrate] PowerManager obtained for per-cycle wake locks")
+            except Exception as e:
+                print(f"[Vibrate] PowerManager error: {e}")
+                power_manager = None
 
             for i in range(cycles):
                 if not self.alert_active:
@@ -760,37 +773,43 @@ class EmailAlertApp(App):
                     break
 
                 try:
-                    # Use AudioAttributes for each vibration call
+                    # CRITICAL: Acquire NEW wake lock EVERY cycle to fight vivo
+                    if power_manager and i % 2 == 0:  # Every other cycle (every 400ms)
+                        try:
+                            # Release old wake lock if held
+                            if self.wake_lock and self.wake_lock.isHeld():
+                                try:
+                                    self.wake_lock.release()
+                                except:
+                                    pass
+
+                            # Create FRESH wake lock with PARTIAL_WAKE_LOCK for lockscreen
+                            self.wake_lock = power_manager.newWakeLock(
+                                PowerManager.PARTIAL_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                                f"EmailAlert::Cycle{i}"
+                            )
+                            self.wake_lock.acquire(10000)  # 10 second timeout per lock
+                        except Exception as we:
+                            pass  # Continue anyway
+
+                    # Vibrate with AudioAttributes every cycle
                     try:
                         AudioAttributes = autoclass('android.media.AudioAttributes')
                         attrs = AudioAttributes.Builder() \
                             .setUsage(AudioAttributes.USAGE_ALARM) \
                             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION) \
                             .build()
-
-                        # Vibrate with ALARM attributes - vivo respects this more
-                        self.vibrator.vibrate(400, attrs)  # 400ms vibration with attrs
+                        self.vibrator.vibrate(vibrate_duration, attrs)
                     except:
-                        # Fallback to simple vibrate
-                        self.vibrator.vibrate(400)
+                        self.vibrator.vibrate(vibrate_duration)
 
-                    # Very short sleep - prevents vivo from suspending
-                    time.sleep(0.5)
+                    # Very short sleep
+                    time.sleep(cycle_duration)
 
-                    # Re-acquire wake lock every 10 cycles to keep system awake
-                    if i % 10 == 0 and self.wake_lock:
-                        try:
-                            if not self.wake_lock.isHeld():
-                                remaining_time = (self.alert_duration - (i * 0.5)) + 5
-                                self.wake_lock.acquire(int(remaining_time * 1000))
-                                print(f"[Vibrate] Re-acquired wake lock ({remaining_time:.1f}s)")
-                        except Exception as we:
-                            print(f"[Vibrate] Wake lock re-acquire failed: {we}")
-
-                    if i % 20 == 0:  # Log every 10 seconds
-                        elapsed = i * 0.5
+                    if i % 25 == 0:  # Log every 5 seconds
+                        elapsed = i * cycle_duration
                         remaining = self.alert_duration - elapsed
-                        print(f"[Vibrate] Progress: {elapsed:.1f}s / {self.alert_duration}s (remaining: {remaining:.1f}s)")
+                        print(f"[Vibrate] {elapsed:.1f}s / {self.alert_duration}s (remaining: {remaining:.1f}s)")
 
                 except Exception as ve:
                     print(f"[Vibrate] Cycle {i} error: {ve}")
