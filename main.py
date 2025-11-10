@@ -27,11 +27,12 @@ if platform == 'android':
         from android.permissions import request_permissions, Permission
         from jnius import autoclass
 
-        # Request basic permissions only
+        # Request all needed permissions
         request_permissions([
             Permission.INTERNET,
             Permission.VIBRATE,
-            Permission.WAKE_LOCK
+            Permission.WAKE_LOCK,
+            Permission.FOREGROUND_SERVICE
         ])
 
         # Android classes
@@ -43,6 +44,13 @@ if platform == 'android':
         MediaPlayer = autoclass('android.media.MediaPlayer')
         AudioAttributes = autoclass('android.media.AudioAttributes')
         AudioAttributesBuilder = autoclass('android.media.AudioAttributes$Builder')
+        NotificationChannel = autoclass('android.app.NotificationChannel')
+        NotificationManager = autoclass('android.app.NotificationManager')
+        Notification = autoclass('android.app.Notification')
+        NotificationBuilder = autoclass('android.app.Notification$Builder')
+        PendingIntent = autoclass('android.app.PendingIntent')
+        Intent = autoclass('android.content.Intent')
+        Service = autoclass('android.app.Service')
 
         ANDROID_AVAILABLE = True
     except Exception as e:
@@ -65,22 +73,36 @@ class EmailAlertApp(App):
         self.audio_manager = None
         self.alert_active = False
 
+        # Configuration
+        self.alert_duration = 70  # seconds
+        self.custom_ringtone_path = None
+
+        # Foreground service
+        self.notification_id = 1
+        self.foreground_running = False
+
     def build(self):
         """Build the UI"""
         Window.clearcolor = (0.1, 0.1, 0.15, 1)
 
         # Main layout
-        layout = BoxLayout(orientation='vertical', padding=20, spacing=15)
+        main_layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
 
         # Title
         title = Label(
             text='Email Monitor',
-            font_size='28sp',
-            size_hint_y=0.1,
+            font_size='24sp',
+            size_hint_y=0.08,
             bold=True,
             color=(1, 1, 1, 1)
         )
-        layout.add_widget(title)
+        main_layout.add_widget(title)
+
+        # Create scrollable content area
+        scroll = ScrollView(size_hint_y=0.92)
+        layout = BoxLayout(orientation='vertical', padding=10, spacing=10, size_hint_y=None)
+        layout.bind(minimum_height=layout.setter('height'))
+        scroll.add_widget(layout)
 
         # Status
         self.status_label = Label(
@@ -92,7 +114,7 @@ class EmailAlertApp(App):
         layout.add_widget(self.status_label)
 
         # Server URL input
-        url_layout = BoxLayout(orientation='horizontal', size_hint_y=0.1, spacing=10)
+        url_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=50, spacing=10)
         url_layout.add_widget(Label(text='Server:', size_hint_x=0.25, color=(1, 1, 1, 1)))
         self.url_input = TextInput(
             text='http://10.0.0.170:8080',
@@ -102,8 +124,74 @@ class EmailAlertApp(App):
         url_layout.add_widget(self.url_input)
         layout.add_widget(url_layout)
 
+        # Settings section
+        settings_label = Label(
+            text='Settings',
+            font_size='18sp',
+            size_hint_y=None,
+            height=30,
+            color=(0.8, 0.8, 1, 1),
+            bold=True
+        )
+        layout.add_widget(settings_label)
+
+        # Foreground service toggle
+        foreground_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=40, spacing=10)
+        foreground_layout.add_widget(Label(text='Background Service:', size_hint_x=0.6, color=(1, 1, 1, 1)))
+        self.foreground_btn = Button(
+            text='OFF',
+            size_hint_x=0.4,
+            background_color=(0.5, 0.5, 0.5, 1),
+            background_normal=''
+        )
+        self.foreground_btn.bind(on_press=self.toggle_foreground_service)
+        foreground_layout.add_widget(self.foreground_btn)
+        layout.add_widget(foreground_layout)
+
+        # Alert duration slider
+        duration_label_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=30)
+        duration_label_layout.add_widget(Label(text='Alert Duration:', size_hint_x=0.6, color=(1, 1, 1, 1)))
+        self.duration_value_label = Label(text=f'{self.alert_duration}s', size_hint_x=0.4, color=(1, 1, 1, 1))
+        duration_label_layout.add_widget(self.duration_value_label)
+        layout.add_widget(duration_label_layout)
+
+        from kivy.uix.slider import Slider
+        self.duration_slider = Slider(
+            min=10,
+            max=300,
+            value=self.alert_duration,
+            step=5,
+            size_hint_y=None,
+            height=40
+        )
+        self.duration_slider.bind(value=self.on_duration_change)
+        layout.add_widget(self.duration_slider)
+
+        # Custom ringtone button
+        ringtone_btn = Button(
+            text='Select Custom Ringtone',
+            size_hint_y=None,
+            height=50,
+            background_color=(0.3, 0.5, 0.7, 1),
+            background_normal=''
+        )
+        ringtone_btn.bind(on_press=self.select_ringtone)
+        layout.add_widget(ringtone_btn)
+
+        self.ringtone_label = Label(
+            text='Using: Default Beep',
+            font_size='12sp',
+            size_hint_y=None,
+            height=25,
+            color=(0.7, 0.7, 0.7, 1)
+        )
+        layout.add_widget(self.ringtone_label)
+
+        # Separator
+        layout.add_widget(Label(text='', size_hint_y=None, height=10))
+
         # Buttons
-        btn_layout = BoxLayout(orientation='horizontal', size_hint_y=0.12, spacing=10)
+        btn_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=60, spacing=10)
 
         self.connect_btn = Button(
             text='Connect',
@@ -127,7 +215,8 @@ class EmailAlertApp(App):
         self.count_label = Label(
             text='Alerts: 0',
             font_size='20sp',
-            size_hint_y=0.08,
+            size_hint_y=None,
+            height=40,
             color=(1, 1, 1, 1)
         )
         layout.add_widget(self.count_label)
@@ -136,12 +225,13 @@ class EmailAlertApp(App):
         log_label = Label(
             text='Alert Log:',
             font_size='16sp',
-            size_hint_y=0.06,
+            size_hint_y=None,
+            height=30,
             color=(0.8, 0.8, 0.8, 1)
         )
         layout.add_widget(log_label)
 
-        scroll = ScrollView(size_hint_y=0.46)
+        log_scroll = ScrollView(size_hint_y=None, height=200)
         self.log_label = Label(
             text='No alerts yet',
             font_size='14sp',
@@ -152,14 +242,17 @@ class EmailAlertApp(App):
             valign='top'
         )
         self.log_label.bind(texture_size=self.log_label.setter('size'))
-        scroll.add_widget(self.log_label)
-        layout.add_widget(scroll)
+        log_scroll.add_widget(self.log_label)
+        layout.add_widget(log_scroll)
+
+        # Add content to main layout
+        main_layout.add_widget(scroll)
 
         # Initialize Android components
         if ANDROID_AVAILABLE:
             self.init_android()
 
-        return layout
+        return main_layout
 
     def init_android(self):
         """Initialize Android specific components"""
@@ -190,34 +283,230 @@ class EmailAlertApp(App):
             self.audio_manager.setStreamVolume(AudioManager.STREAM_ALARM, max_volume, 0)
             print(f"[Init] Alarm volume set to MAX: {max_volume}")
 
-            # Initialize MediaPlayer with alarm.wav
-            try:
-                self.media_player = MediaPlayer()
-
-                # Set AudioAttributes for ALARM stream
-                audio_attrs = AudioAttributesBuilder() \
-                    .setUsage(AudioAttributes.USAGE_ALARM) \
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION) \
-                    .build()
-
-                self.media_player.setAudioAttributes(audio_attrs)
-
-                # Set data source to alarm.wav in app directory
-                import os
-                audio_file = os.path.join(os.path.dirname(__file__), 'alarm.wav')
-                self.media_player.setDataSource(audio_file)
-                self.media_player.prepare()
-                self.media_player.setLooping(True)
-                self.media_player.setVolume(1.0, 1.0)  # Max volume
-
-                print(f"[Init] MediaPlayer ready with {audio_file}")
-            except Exception as e:
-                print(f"[Init] MediaPlayer error: {e}")
-                self.media_player = None
+            # Initialize MediaPlayer
+            self.init_media_player()
 
             print("[Android] ===== ALL INITIALIZED SUCCESSFULLY =====")
         except Exception as e:
             print(f"[Android] Init FAILED: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def toggle_foreground_service(self, instance):
+        """Toggle foreground service for background persistence"""
+        if not ANDROID_AVAILABLE:
+            print("[Foreground] Not available on this platform")
+            return
+
+        if not self.foreground_running:
+            self.start_foreground_service()
+            self.foreground_btn.text = 'ON'
+            self.foreground_btn.background_color = (0.2, 0.6, 0.2, 1)
+        else:
+            self.stop_foreground_service()
+            self.foreground_btn.text = 'OFF'
+            self.foreground_btn.background_color = (0.5, 0.5, 0.5, 1)
+
+    def start_foreground_service(self):
+        """Start foreground service with persistent notification"""
+        try:
+            activity = PythonActivity.mActivity
+            context = activity.getApplicationContext()
+
+            # Create notification channel (required for Android O+)
+            channel_id = "email_alert_channel"
+            notification_manager = context.getSystemService(Context.NOTIFICATION_SERVICE)
+
+            try:
+                channel = NotificationChannel(
+                    channel_id,
+                    "Email Alerts",
+                    NotificationManager.IMPORTANCE_HIGH
+                )
+                channel.setDescription("Email monitoring alerts")
+                notification_manager.createNotificationChannel(channel)
+                print("[Foreground] Notification channel created")
+            except Exception as e:
+                print(f"[Foreground] Channel creation error (may be old Android): {e}")
+
+            # Create notification
+            notification_builder = NotificationBuilder(context, channel_id)
+            notification_builder.setContentTitle("Email Monitor Running")
+            notification_builder.setContentText("Monitoring for email alerts...")
+            notification_builder.setSmallIcon(context.getApplicationInfo().icon)
+            notification_builder.setOngoing(True)  # Can't be dismissed
+
+            notification = notification_builder.build()
+
+            # Start foreground
+            try:
+                from jnius import cast
+                service = cast('android.app.Service', activity)
+                service.startForeground(self.notification_id, notification)
+                print("[Foreground] ✓ Service started")
+                self.foreground_running = True
+            except Exception as e:
+                print(f"[Foreground] startForeground error: {e}")
+                # Fallback: just show notification
+                notification_manager.notify(self.notification_id, notification)
+                self.foreground_running = True
+                print("[Foreground] ✓ Notification shown (fallback)")
+
+        except Exception as e:
+            print(f"[Foreground] Start FAILED: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def stop_foreground_service(self):
+        """Stop foreground service"""
+        try:
+            activity = PythonActivity.mActivity
+            context = activity.getApplicationContext()
+
+            try:
+                from jnius import cast
+                service = cast('android.app.Service', activity)
+                service.stopForeground(True)
+                print("[Foreground] ✓ Service stopped")
+            except Exception as e:
+                print(f"[Foreground] stopForeground error: {e}")
+                # Fallback: cancel notification
+                notification_manager = context.getSystemService(Context.NOTIFICATION_SERVICE)
+                notification_manager.cancel(self.notification_id)
+                print("[Foreground] ✓ Notification cancelled (fallback)")
+
+            self.foreground_running = False
+
+        except Exception as e:
+            print(f"[Foreground] Stop FAILED: {e}")
+
+    def on_duration_change(self, instance, value):
+        """Handle alert duration slider change"""
+        self.alert_duration = int(value)
+        self.duration_value_label.text = f'{self.alert_duration}s'
+        print(f"[Config] Alert duration set to {self.alert_duration}s")
+
+    def select_ringtone(self, instance):
+        """Open file picker for custom ringtone"""
+        if platform == 'android':
+            try:
+                # Use Android file picker
+                from android import activity
+                from jnius import autoclass, cast
+
+                Intent = autoclass('android.content.Intent')
+                Uri = autoclass('android.net.Uri')
+
+                intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+                intent.addCategory(Intent.CATEGORY_OPENABLE)
+                intent.setType("audio/*")
+
+                activity.bind(on_activity_result=self.on_ringtone_selected)
+                PythonActivity.mActivity.startActivityForResult(intent, 1001)
+                print("[Ringtone] File picker opened")
+
+            except Exception as e:
+                print(f"[Ringtone] Picker error: {e}")
+                self.ringtone_label.text = "Error: Could not open file picker"
+        else:
+            # Desktop: just show info
+            self.ringtone_label.text = "Custom ringtone only works on Android"
+            print("[Ringtone] Not available on desktop")
+
+    def on_ringtone_selected(self, request_code, result_code, data):
+        """Handle ringtone file selection result"""
+        if request_code == 1001 and result_code == -1:  # RESULT_OK
+            try:
+                uri = data.getData()
+
+                # Get real path from URI
+                from jnius import autoclass, cast
+                ContentResolver = autoclass('android.content.ContentResolver')
+                ParcelFileDescriptor = autoclass('android.os.ParcelFileDescriptor')
+
+                activity = PythonActivity.mActivity
+                context = activity.getApplicationContext()
+                content_resolver = context.getContentResolver()
+
+                # Copy file to app's internal storage
+                import os
+                import shutil
+
+                ringtone_path = os.path.join(os.path.dirname(__file__), 'custom_ringtone.mp3')
+
+                # Open input stream
+                input_stream = content_resolver.openInputStream(uri)
+                input_stream_reader = autoclass('java.io.InputStream')
+
+                # Save to file
+                with open(ringtone_path, 'wb') as f:
+                    buffer = bytearray(8192)
+                    while True:
+                        bytes_read = input_stream.read(buffer)
+                        if bytes_read == -1:
+                            break
+                        f.write(buffer[:bytes_read])
+
+                input_stream.close()
+
+                self.custom_ringtone_path = ringtone_path
+                self.ringtone_label.text = 'Using: Custom Ringtone'
+                print(f"[Ringtone] ✓ Custom ringtone saved: {ringtone_path}")
+
+                # Reinitialize MediaPlayer with new file
+                self.init_media_player()
+
+            except Exception as e:
+                print(f"[Ringtone] Selection error: {e}")
+                import traceback
+                traceback.print_exc()
+                self.ringtone_label.text = "Error: Could not load ringtone"
+
+    def init_media_player(self):
+        """Initialize or reinitialize MediaPlayer with current ringtone"""
+        if not ANDROID_AVAILABLE:
+            return
+
+        try:
+            # Stop and release old player if exists
+            if self.media_player:
+                try:
+                    if self.media_player.isPlaying():
+                        self.media_player.stop()
+                    self.media_player.release()
+                except:
+                    pass
+
+            activity = PythonActivity.mActivity
+            context = activity.getApplicationContext()
+
+            # Create new player
+            self.media_player = MediaPlayer()
+
+            # Set AudioAttributes for ALARM stream
+            audio_attrs = AudioAttributesBuilder() \
+                .setUsage(AudioAttributes.USAGE_ALARM) \
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION) \
+                .build()
+
+            self.media_player.setAudioAttributes(audio_attrs)
+
+            # Set data source
+            import os
+            if self.custom_ringtone_path and os.path.exists(self.custom_ringtone_path):
+                audio_file = self.custom_ringtone_path
+            else:
+                audio_file = os.path.join(os.path.dirname(__file__), 'alarm.wav')
+
+            self.media_player.setDataSource(audio_file)
+            self.media_player.prepare()
+            self.media_player.setLooping(True)
+            self.media_player.setVolume(1.0, 1.0)
+
+            print(f"[MediaPlayer] ✓ Initialized with: {audio_file}")
+
+        except Exception as e:
+            print(f"[MediaPlayer] Init error: {e}")
             import traceback
             traceback.print_exc()
 
@@ -317,8 +606,9 @@ class EmailAlertApp(App):
             if self.wake_lock:
                 try:
                     if not self.wake_lock.isHeld():
-                        self.wake_lock.acquire(75000)  # 75 seconds
-                        print("[Wake] ✓ WAKE LOCK ACQUIRED (75s)")
+                        wake_duration = (self.alert_duration + 5) * 1000  # Alert duration + 5s buffer, in milliseconds
+                        self.wake_lock.acquire(wake_duration)
+                        print(f"[Wake] ✓ WAKE LOCK ACQUIRED ({self.alert_duration + 5}s)")
                     else:
                         print("[Wake] Wake lock already held")
                 except Exception as e:
@@ -352,12 +642,12 @@ class EmailAlertApp(App):
             else:
                 print(f"[Vibrate] ✗ Vibrator NOT available!")
 
-            print(f"\n[Alert] Starting vibration and sound threads...")
+            print(f"\n[Alert] Starting vibration and sound threads ({self.alert_duration}s)...")
 
-            # Vibrate for 70 seconds in background thread
+            # Vibrate for configured duration in background thread
             threading.Thread(target=self.vibrate_long, daemon=True, name="VibrateThread").start()
 
-            # Play alarm sound for 70 seconds in background thread
+            # Play alarm sound for configured duration in background thread
             threading.Thread(target=self.play_alarm_long, daemon=True, name="SoundThread").start()
 
             print(f"[Alert] Both threads started!\n")
@@ -365,14 +655,15 @@ class EmailAlertApp(App):
             print(f"[Desktop Alert] {title}: {message}")
 
     def vibrate_long(self):
-        """Vibrate for 70 seconds - keep checking alert_active"""
+        """Vibrate for configured duration - keep checking alert_active"""
         if not self.vibrator:
             return
 
         try:
-            print("[Vibrate] Starting 70-second vibration")
+            cycles = int(self.alert_duration / 0.8)  # Calculate cycles based on duration
+            print(f"[Vibrate] Starting {self.alert_duration}s vibration ({cycles} cycles)")
             # Simple loop - more reliable on vivo
-            for i in range(87):  # 87 cycles ≈ 70 seconds
+            for i in range(cycles):
                 if not self.alert_active:
                     print("[Vibrate] Stopped by alert_active flag")
                     break
@@ -389,7 +680,7 @@ class EmailAlertApp(App):
             self.alert_active = False
 
     def play_alarm_long(self):
-        """Play alarm sound for 70 seconds using MediaPlayer"""
+        """Play alarm sound for configured duration using MediaPlayer"""
         if not self.media_player:
             print("[Sound] MediaPlayer not available!")
             return
@@ -401,11 +692,12 @@ class EmailAlertApp(App):
             self.media_player.start()
             print("[Sound] MediaPlayer.start() called - SHOULD BE PLAYING NOW")
 
-            # Keep playing for 70 seconds
-            for i in range(14):  # Check every 5 seconds, 14 times = 70 seconds
+            # Keep playing for configured duration
+            checks = int(self.alert_duration / 5)  # Check every 5 seconds
+            for i in range(checks):
                 time.sleep(5)
                 is_playing = self.media_player.isPlaying()
-                print(f"[Sound] Check {i+1}/14: isPlaying={is_playing}, alert_active={self.alert_active}")
+                print(f"[Sound] Check {i+1}/{checks}: isPlaying={is_playing}, alert_active={self.alert_active}")
                 if not self.alert_active:
                     print("[Sound] alert_active is False, stopping")
                     break

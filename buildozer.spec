@@ -4,12 +4,12 @@ title = Email Alert
 package.name = emailalert
 package.domain = com.emailmonitor
 source.dir = .
-source.include_exts = py,png,jpg,kv,atlas,wav
-version = 1.0
+source.include_exts = py,png,jpg,kv,atlas,wav,mp3
+version = 1.1
 
 requirements = python3,kivy,requests
 
-android.permissions = INTERNET,VIBRATE,WAKE_LOCK
+android.permissions = INTERNET,VIBRATE,WAKE_LOCK,FOREGROUND_SERVICE,POST_NOTIFICATIONS
 android.api = 29
 android.minapi = 21
 android.archs = arm64-v8a
