@@ -38,10 +38,11 @@ if platform == 'android':
         PythonActivity = autoclass('org.kivy.android.PythonActivity')
         Context = autoclass('android.content.Context')
         Vibrator = autoclass('android.os.Vibrator')
-        RingtoneManager = autoclass('android.media.RingtoneManager')
         PowerManager = autoclass('android.os.PowerManager')
         AudioManager = autoclass('android.media.AudioManager')
         MediaPlayer = autoclass('android.media.MediaPlayer')
+        AudioAttributes = autoclass('android.media.AudioAttributes')
+        AudioAttributesBuilder = autoclass('android.media.AudioAttributes$Builder')
 
         ANDROID_AVAILABLE = True
     except Exception as e:
@@ -59,7 +60,7 @@ class EmailAlertApp(App):
         self.alert_count = 0
         self.running = False
         self.vibrator = None
-        self.ringtone = None
+        self.media_player = None
         self.wake_lock = None
         self.audio_manager = None
         self.alert_active = False
@@ -168,25 +169,57 @@ class EmailAlertApp(App):
 
             # Get Vibrator
             self.vibrator = context.getSystemService(Context.VIBRATOR_SERVICE)
+            print("[Init] Vibrator obtained")
 
-            # Get default alarm ringtone
-            alarm_uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-            self.ringtone = RingtoneManager.getRingtone(activity, alarm_uri)
-
-            # Get PowerManager and create WakeLock
-            # Use SCREEN_DIM_WAKE_LOCK to keep screen slightly on (works better on vivo)
+            # Get PowerManager and create STRONGEST WakeLock
             power_manager = context.getSystemService(Context.POWER_SERVICE)
-            self.wake_lock = power_manager.newWakeLock(
-                PowerManager.SCREEN_DIM_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP,
-                "EmailAlert::AlertWakeLock"
-            )
+            # Use FULL_WAKE_LOCK for maximum power - deprecated but most reliable
+            try:
+                from jnius import cast
+                self.wake_lock = power_manager.newWakeLock(
+                    PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP | PowerManager.ON_AFTER_RELEASE,
+                    "EmailAlert::FullWakeLock"
+                )
+                print("[Init] FULL WakeLock created")
+            except Exception as e:
+                print(f"[Init] WakeLock error: {e}")
 
-            # Get AudioManager
+            # Get AudioManager and set volume to MAX
             self.audio_manager = context.getSystemService(Context.AUDIO_SERVICE)
+            max_volume = self.audio_manager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+            self.audio_manager.setStreamVolume(AudioManager.STREAM_ALARM, max_volume, 0)
+            print(f"[Init] Alarm volume set to MAX: {max_volume}")
 
-            print("[Android] Initialized successfully")
+            # Initialize MediaPlayer with alarm.wav
+            try:
+                self.media_player = MediaPlayer()
+
+                # Set AudioAttributes for ALARM stream
+                audio_attrs = AudioAttributesBuilder() \
+                    .setUsage(AudioAttributes.USAGE_ALARM) \
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION) \
+                    .build()
+
+                self.media_player.setAudioAttributes(audio_attrs)
+
+                # Set data source to alarm.wav in app directory
+                import os
+                audio_file = os.path.join(os.path.dirname(__file__), 'alarm.wav')
+                self.media_player.setDataSource(audio_file)
+                self.media_player.prepare()
+                self.media_player.setLooping(True)
+                self.media_player.setVolume(1.0, 1.0)  # Max volume
+
+                print(f"[Init] MediaPlayer ready with {audio_file}")
+            except Exception as e:
+                print(f"[Init] MediaPlayer error: {e}")
+                self.media_player = None
+
+            print("[Android] ===== ALL INITIALIZED SUCCESSFULLY =====")
         except Exception as e:
-            print(f"[Android] Init failed: {e}")
+            print(f"[Android] Init FAILED: {e}")
+            import traceback
+            traceback.print_exc()
 
     def toggle_connection(self, instance):
         """Toggle connection to server"""
@@ -272,34 +305,62 @@ class EmailAlertApp(App):
 
     def trigger_alert(self, title, message):
         """Trigger sound and vibration"""
-        print(f"[Alert] {title}")
+        print(f"\n{'='*50}")
+        print(f"[Alert] ===== ALERT TRIGGERED: {title} =====")
+        print(f"{'='*50}\n")
 
         if ANDROID_AVAILABLE:
             self.alert_active = True
+            print(f"[Alert] alert_active set to True")
 
-            # Acquire wake lock to keep device awake during alert
-            if self.wake_lock and not self.wake_lock.isHeld():
-                self.wake_lock.acquire(75000)  # 75 seconds (70s alert + 5s buffer)
-                print("[Wake] Lock acquired")
+            # Acquire STRONGEST wake lock
+            if self.wake_lock:
+                try:
+                    if not self.wake_lock.isHeld():
+                        self.wake_lock.acquire(75000)  # 75 seconds
+                        print("[Wake] ✓ WAKE LOCK ACQUIRED (75s)")
+                    else:
+                        print("[Wake] Wake lock already held")
+                except Exception as e:
+                    print(f"[Wake] ERROR: {e}")
+            else:
+                print("[Wake] ✗ Wake lock not available!")
 
-            # Keep audio focus to prevent system from sleeping
-            # This is more reliable on vivo than wake lock alone
+            # Request audio focus (CRITICAL for vivo)
             if self.audio_manager:
                 try:
-                    self.audio_manager.requestAudioFocus(
+                    result = self.audio_manager.requestAudioFocus(
                         None,
                         AudioManager.STREAM_ALARM,
                         AudioManager.AUDIOFOCUS_GAIN
                     )
-                    print("[Audio] Focus acquired")
+                    print(f"[Audio] ✓ AUDIO FOCUS acquired (result={result})")
                 except Exception as e:
-                    print(f"[Audio] Focus failed: {e}")
+                    print(f"[Audio] ✗ Focus failed: {e}")
+            else:
+                print("[Audio] ✗ AudioManager not available!")
+
+            # Check MediaPlayer status
+            if self.media_player:
+                print(f"[Media] ✓ MediaPlayer available")
+            else:
+                print(f"[Media] ✗ MediaPlayer NOT available!")
+
+            # Check Vibrator status
+            if self.vibrator:
+                print(f"[Vibrate] ✓ Vibrator available")
+            else:
+                print(f"[Vibrate] ✗ Vibrator NOT available!")
+
+            print(f"\n[Alert] Starting vibration and sound threads...")
 
             # Vibrate for 70 seconds in background thread
-            threading.Thread(target=self.vibrate_long, daemon=True).start()
+            threading.Thread(target=self.vibrate_long, daemon=True, name="VibrateThread").start()
 
             # Play alarm sound for 70 seconds in background thread
-            threading.Thread(target=self.play_alarm_long, daemon=True).start()
+            threading.Thread(target=self.play_alarm_long, daemon=True, name="SoundThread").start()
+
+            print(f"[Alert] Both threads started!\n")
         else:
             print(f"[Desktop Alert] {title}: {message}")
 
@@ -328,29 +389,37 @@ class EmailAlertApp(App):
             self.alert_active = False
 
     def play_alarm_long(self):
-        """Play alarm sound for 70 seconds - keep looping"""
-        if not self.ringtone:
+        """Play alarm sound for 70 seconds using MediaPlayer"""
+        if not self.media_player:
+            print("[Sound] MediaPlayer not available!")
             return
 
         try:
-            print("[Sound] Starting alarm")
-            # Set to loop mode if possible
-            if hasattr(self.ringtone, 'setLooping'):
-                self.ringtone.setLooping(True)
+            print("[Sound] ===== STARTING ALARM =====")
 
-            # Play alarm
-            if hasattr(self.ringtone, 'play'):
-                self.ringtone.play()
+            # Start playing (already set to loop in init)
+            self.media_player.start()
+            print("[Sound] MediaPlayer.start() called - SHOULD BE PLAYING NOW")
 
             # Keep playing for 70 seconds
-            time.sleep(70)
+            for i in range(14):  # Check every 5 seconds, 14 times = 70 seconds
+                time.sleep(5)
+                is_playing = self.media_player.isPlaying()
+                print(f"[Sound] Check {i+1}/14: isPlaying={is_playing}, alert_active={self.alert_active}")
+                if not self.alert_active:
+                    print("[Sound] alert_active is False, stopping")
+                    break
 
             # Stop
-            if hasattr(self.ringtone, 'stop'):
-                self.ringtone.stop()
-            print("[Sound] Stopped")
+            if self.media_player.isPlaying():
+                self.media_player.pause()
+                self.media_player.seekTo(0)  # Reset to beginning
+            print("[Sound] ===== ALARM STOPPED =====")
+
         except Exception as e:
-            print(f"[Sound Error] {e}")
+            print(f"[Sound ERROR] {e}")
+            import traceback
+            traceback.print_exc()
         finally:
             # Release audio focus
             if self.audio_manager:
