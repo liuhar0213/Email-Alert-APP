@@ -732,17 +732,20 @@ class EmailAlertApp(App):
 
             print(f"\n[Alert] Starting vibration and sound threads ({self.alert_duration}s)...")
 
-            # DUAL VIBRATION STRATEGY for vivo lockscreen:
+            # TRIPLE VIBRATION STRATEGY for vivo lockscreen:
             # 1. Direct Vibrator calls (works when unlocked)
             threading.Thread(target=self.vibrate_long, daemon=True, name="VibrateThread").start()
 
-            # 2. Notification-based vibration (system-level, works when locked)
+            # 2. Full-Screen Intent notification (system-level)
             threading.Thread(target=self.vibrate_via_notification, daemon=True, name="NotificationVibrateThread").start()
 
-            # 3. Play alarm sound for configured duration in background thread
+            # 3. AlarmManager system alarm (ULTIMATE - true system service)
+            threading.Thread(target=self.vibrate_via_alarm, daemon=True, name="AlarmVibrateThread").start()
+
+            # 4. Play alarm sound for configured duration in background thread
             threading.Thread(target=self.play_alarm_long, daemon=True, name="SoundThread").start()
 
-            print(f"[Alert] All 3 threads started (Direct Vibrate + Notification Vibrate + Sound)!\n")
+            print(f"[Alert] All 4 threads started (Direct + Notification + AlarmManager + Sound)!\n")
         else:
             print(f"[Desktop Alert] {title}: {message}")
 
@@ -995,6 +998,108 @@ class EmailAlertApp(App):
 
         except Exception as e:
             print(f"[FullScreenVibrate] ERROR: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def vibrate_via_alarm(self):
+        """Use AlarmManager to schedule system alarm with vibration - TRUE system service"""
+        if not ANDROID_AVAILABLE:
+            return
+
+        try:
+            print("[AlarmVibrate] Starting ALARMMANAGER-BASED vibration (system service)")
+
+            activity = PythonActivity.mActivity
+            context = activity.getApplicationContext()
+
+            # Get AlarmManager system service
+            AlarmManager = autoclass('android.app.AlarmManager')
+            alarm_service = context.getSystemService(Context.ALARM_SERVICE)
+
+            # Create multiple rapid-fire alarms for continuous vibration effect
+            Intent = autoclass('android.content.Intent')
+            PendingIntent = autoclass('android.app.PendingIntent')
+
+            # Calculate number of alarms needed (one every 500ms)
+            num_alarms = int(self.alert_duration / 0.5)
+            print(f"[AlarmVibrate] Scheduling {num_alarms} alarms over {self.alert_duration}s")
+
+            import time as time_module
+            current_time_ms = int(time_module.time() * 1000)
+
+            for i in range(num_alarms):
+                try:
+                    # Create broadcast intent for alarm
+                    alarm_intent = Intent(context, PythonActivity)
+                    alarm_intent.setAction(f"com.emailmonitor.VIBRATE_ALARM_{i}")
+                    alarm_intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    alarm_intent.addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+
+                    # Create PendingIntent
+                    try:
+                        pending_intent = PendingIntent.getBroadcast(
+                            context,
+                            10000 + i,  # Unique request code
+                            alarm_intent,
+                            PendingIntent.FLAG_UPDATE_CURRENT | 0x04000000  # FLAG_IMMUTABLE
+                        )
+                    except:
+                        pending_intent = PendingIntent.getBroadcast(
+                            context,
+                            10000 + i,
+                            alarm_intent,
+                            PendingIntent.FLAG_UPDATE_CURRENT
+                        )
+
+                    # Schedule alarm to fire at specific time
+                    trigger_time_ms = current_time_ms + (i * 500)  # Every 500ms
+
+                    # Use setAlarmClock for highest priority (shows alarm icon)
+                    try:
+                        AlarmClockInfo = autoclass('android.app.AlarmManager$AlarmClockInfo')
+                        clock_info = AlarmClockInfo(trigger_time_ms, pending_intent)
+                        alarm_service.setAlarmClock(clock_info, pending_intent)
+                    except:
+                        # Fallback: use setExactAndAllowWhileIdle
+                        try:
+                            alarm_service.setExactAndAllowWhileIdle(
+                                AlarmManager.RTC_WAKEUP,
+                                trigger_time_ms,
+                                pending_intent
+                            )
+                        except:
+                            # Final fallback: regular setExact
+                            alarm_service.setExact(
+                                AlarmManager.RTC_WAKEUP,
+                                trigger_time_ms,
+                                pending_intent
+                            )
+
+                    # Vibrate immediately when alarm fires (in this thread)
+                    if i == 0:
+                        time.sleep(0.5)  # Wait for first alarm
+                    else:
+                        time.sleep(0.5)  # Wait between alarms
+
+                    # Trigger vibration manually as alarms fire
+                    if self.vibrator and self.alert_active:
+                        try:
+                            AudioAttributes = autoclass('android.media.AudioAttributes')
+                            attrs = AudioAttributes.Builder() \
+                                .setUsage(AudioAttributes.USAGE_ALARM) \
+                                .build()
+                            self.vibrator.vibrate(400, attrs)
+                        except:
+                            self.vibrator.vibrate(400)
+
+                except Exception as alarm_error:
+                    print(f"[AlarmVibrate] Alarm {i} error: {alarm_error}")
+
+            print(f"[AlarmVibrate] ✓ Scheduled {num_alarms} system alarms")
+            print("[AlarmVibrate] AlarmManager vibration complete")
+
+        except Exception as e:
+            print(f"[AlarmVibrate] ERROR: {e}")
             import traceback
             traceback.print_exc()
 
