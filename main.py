@@ -732,20 +732,23 @@ class EmailAlertApp(App):
 
             print(f"\n[Alert] Starting vibration and sound threads ({self.alert_duration}s)...")
 
-            # TRIPLE VIBRATION STRATEGY for vivo lockscreen:
+            # MULTI-METHOD VIBRATION STRATEGY:
             # 1. Direct Vibrator calls (works when unlocked)
             threading.Thread(target=self.vibrate_long, daemon=True, name="VibrateThread").start()
 
             # 2. Full-Screen Intent notification (system-level)
             threading.Thread(target=self.vibrate_via_notification, daemon=True, name="NotificationVibrateThread").start()
 
-            # 3. AlarmManager system alarm (ULTIMATE - true system service)
+            # 3. AlarmManager system alarm
             threading.Thread(target=self.vibrate_via_alarm, daemon=True, name="AlarmVibrateThread").start()
 
-            # 4. Play alarm sound for configured duration in background thread
+            # 4. WEARABLE DEVICE NOTIFICATIONS (for smartwatch/band)
+            threading.Thread(target=self.vibrate_via_wearable, daemon=True, name="WearableVibrateThread").start()
+
+            # 5. Play alarm sound for configured duration in background thread
             threading.Thread(target=self.play_alarm_long, daemon=True, name="SoundThread").start()
 
-            print(f"[Alert] All 4 threads started (Direct + Notification + AlarmManager + Sound)!\n")
+            print(f"[Alert] All 5 threads started (Direct + Notification + Alarm + Wearable + Sound)!\n")
         else:
             print(f"[Desktop Alert] {title}: {message}")
 
@@ -1100,6 +1103,117 @@ class EmailAlertApp(App):
 
         except Exception as e:
             print(f"[AlarmVibrate] ERROR: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def vibrate_via_wearable(self):
+        """Send continuous notifications for smartwatch/band vibration"""
+        if not ANDROID_AVAILABLE:
+            return
+
+        try:
+            print("[WearableVibrate] Starting WEARABLE DEVICE notification sequence")
+            print("[WearableVibrate] This will vibrate your smartwatch/band continuously!")
+
+            activity = PythonActivity.mActivity
+            context = activity.getApplicationContext()
+            notification_manager = context.getSystemService(Context.NOTIFICATION_SERVICE)
+
+            # Create wearable-optimized notification channel
+            channel_id = "wearable_vibration_channel"
+            try:
+                NotificationChannel = autoclass('android.app.NotificationChannel')
+                NotificationManager = autoclass('android.app.NotificationManager')
+
+                channel = NotificationChannel(
+                    channel_id,
+                    "Wearable Alerts",
+                    NotificationManager.IMPORTANCE_HIGH  # HIGH ensures sync to wearable
+                )
+                channel.setDescription("Continuous alerts for smartwatch/band")
+                channel.enableVibration(True)
+                channel.setBypassDnd(True)
+                channel.setLockscreenVisibility(1)
+
+                # Simple vibration pattern that wearables will repeat
+                channel.setVibrationPattern([0, 500, 200, 500, 200, 500])
+
+                notification_manager.createNotificationChannel(channel)
+                print("[WearableVibrate] Wearable channel created")
+
+            except Exception as e:
+                print(f"[WearableVibrate] Channel error: {e}")
+
+            # Send MULTIPLE notifications over the alert duration
+            # Each notification will vibrate the wearable device
+            # Interval: every 3 seconds (typical wearable vibration is ~2s)
+            num_notifications = int(self.alert_duration / 3) + 1
+            print(f"[WearableVibrate] Sending {num_notifications} notifications over {self.alert_duration}s")
+
+            NotificationBuilder = autoclass('android.app.Notification$Builder')
+
+            for i in range(num_notifications):
+                if not self.alert_active:
+                    print("[WearableVibrate] Stopped by alert_active flag")
+                    break
+
+                try:
+                    # Create notification builder
+                    try:
+                        builder = NotificationBuilder(context, channel_id)
+                    except:
+                        builder = NotificationBuilder(context)
+
+                    # Set notification content - changes slightly each time to ensure delivery
+                    alert_num = i + 1
+                    builder.setContentTitle(f"🚨 EMAIL ALERT #{alert_num}")
+                    builder.setContentText(f"Critical email notification - Check immediately!")
+                    builder.setSmallIcon(context.getApplicationInfo().icon)
+                    builder.setPriority(2)  # PRIORITY_MAX
+                    builder.setCategory("alarm")
+                    builder.setVisibility(1)  # VISIBILITY_PUBLIC
+
+                    # CRITICAL for wearables: Set to auto-cancel after a short time
+                    # This ensures each notification is "new" and triggers vibration
+                    builder.setAutoCancel(True)
+                    builder.setTimeoutAfter(2500)  # Auto-dismiss after 2.5s
+
+                    # Vibration pattern for wearable
+                    builder.setVibrate([0, 500, 200, 500, 200, 500])
+
+                    # Set as ongoing for first notification only (shows in notification shade)
+                    if i == 0:
+                        builder.setOngoing(False)  # Allow dismissal
+
+                    # Build notification
+                    notification = builder.build()
+
+                    # Use unique notification ID for each (ensures wearable vibrates for each)
+                    notification_id = 5000 + i
+                    notification_manager.notify(notification_id, notification)
+
+                    print(f"[WearableVibrate] ✓ Notification {alert_num}/{num_notifications} sent (ID: {notification_id})")
+
+                    # Wait 3 seconds before next notification
+                    if i < num_notifications - 1:  # Don't sleep after last one
+                        time.sleep(3)
+
+                except Exception as notif_error:
+                    print(f"[WearableVibrate] Notification {i} error: {notif_error}")
+
+            print(f"[WearableVibrate] ✓ Sent {num_notifications} wearable notifications")
+            print("[WearableVibrate] Your smartwatch/band should have vibrated continuously!")
+
+            # Clean up: cancel all wearable notifications after completion
+            time.sleep(2)
+            for i in range(num_notifications):
+                try:
+                    notification_manager.cancel(5000 + i)
+                except:
+                    pass
+
+        except Exception as e:
+            print(f"[WearableVibrate] ERROR: {e}")
             import traceback
             traceback.print_exc()
 
