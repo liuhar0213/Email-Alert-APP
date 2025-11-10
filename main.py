@@ -686,62 +686,73 @@ class EmailAlertApp(App):
             print(f"[Desktop Alert] {title}: {message}")
 
     def vibrate_long(self):
-        """Vibrate for configured duration - using VibrationEffect for lockscreen persistence"""
+        """Vibrate for configured duration - aggressive method for vivo phones"""
         if not self.vibrator:
             return
 
         try:
-            print(f"[Vibrate] Starting {self.alert_duration}s vibration")
+            print(f"[Vibrate] Starting {self.alert_duration}s AGGRESSIVE vibration for vivo")
 
-            # Try using VibrationEffect for Android O+ (API 26+)
-            try:
-                VibrationEffect = autoclass('android.os.VibrationEffect')
-                AudioAttributes = autoclass('android.media.AudioAttributes')
+            # Use aggressive loop-based vibration that repeatedly calls vibrate()
+            # This prevents vivo's power saving from stopping it
+            cycles = int(self.alert_duration / 0.5)  # Vibrate every 500ms
 
-                # Create a repeating vibration pattern: 500ms on, 300ms off
-                pattern = [0, 500, 300]  # Start immediately, vibrate 500ms, pause 300ms
+            for i in range(cycles):
+                if not self.alert_active:
+                    print("[Vibrate] Stopped by alert_active flag")
+                    break
 
-                # Create VibrationEffect with USAGE_ALARM for highest priority
-                effect = VibrationEffect.createWaveform(pattern, 0)  # 0 = repeat from index 0
-
-                # Create AudioAttributes for ALARM usage
-                attrs = AudioAttributes.Builder() \
-                    .setUsage(AudioAttributes.USAGE_ALARM) \
-                    .build()
-
-                # Start vibration with alarm audio attributes
-                self.vibrator.vibrate(effect, attrs)
-                print(f"[Vibrate] ✓ VibrationEffect started with USAGE_ALARM")
-
-                # Keep thread alive for the configured duration
-                time.sleep(self.alert_duration)
-
-                # Stop vibration
-                self.vibrator.cancel()
-                print("[Vibrate] ✓ Completed and cancelled")
-
-            except Exception as e:
-                # Fallback to simple loop for older Android
-                print(f"[Vibrate] VibrationEffect not available, using fallback: {e}")
-                cycles = int(self.alert_duration / 0.8)
-                for i in range(cycles):
-                    if not self.alert_active:
-                        print("[Vibrate] Stopped by alert_active flag")
-                        break
+                try:
+                    # Use AudioAttributes for each vibration call
                     try:
-                        self.vibrator.vibrate(500)
-                        time.sleep(0.8)
-                    except Exception as ve:
-                        print(f"[Vibrate] Cycle error: {ve}")
-                        break
-                print("[Vibrate] Fallback completed")
+                        AudioAttributes = autoclass('android.media.AudioAttributes')
+                        attrs = AudioAttributes.Builder() \
+                            .setUsage(AudioAttributes.USAGE_ALARM) \
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION) \
+                            .build()
+
+                        # Vibrate with ALARM attributes - vivo respects this more
+                        self.vibrator.vibrate(400, attrs)  # 400ms vibration with attrs
+                    except:
+                        # Fallback to simple vibrate
+                        self.vibrator.vibrate(400)
+
+                    # Very short sleep - prevents vivo from suspending
+                    time.sleep(0.5)
+
+                    # Re-acquire wake lock every 10 cycles to keep system awake
+                    if i % 10 == 0 and self.wake_lock:
+                        try:
+                            if not self.wake_lock.isHeld():
+                                remaining_time = (self.alert_duration - (i * 0.5)) + 5
+                                self.wake_lock.acquire(int(remaining_time * 1000))
+                                print(f"[Vibrate] Re-acquired wake lock ({remaining_time:.1f}s)")
+                        except Exception as we:
+                            print(f"[Vibrate] Wake lock re-acquire failed: {we}")
+
+                    if i % 20 == 0:  # Log every 10 seconds
+                        elapsed = i * 0.5
+                        remaining = self.alert_duration - elapsed
+                        print(f"[Vibrate] Progress: {elapsed:.1f}s / {self.alert_duration}s (remaining: {remaining:.1f}s)")
+
+                except Exception as ve:
+                    print(f"[Vibrate] Cycle {i} error: {ve}")
+                    # Don't break - try to continue vibrating
+                    time.sleep(0.5)
+
+            print(f"[Vibrate] ✓ Completed {cycles} cycles")
 
         except Exception as e:
             print(f"[Vibrate Error] {e}")
             import traceback
             traceback.print_exc()
         finally:
+            try:
+                self.vibrator.cancel()
+            except:
+                pass
             self.alert_active = False
+            print("[Vibrate] Cleanup complete")
 
     def play_alarm_long(self):
         """Play alarm sound for configured duration using MediaPlayer"""
