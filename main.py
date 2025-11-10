@@ -311,7 +311,7 @@ class EmailAlertApp(App):
             self.foreground_btn.background_color = (0.5, 0.5, 0.5, 1)
 
     def start_foreground_service(self):
-        """Start foreground service with persistent notification"""
+        """Show persistent notification (Kivy doesn't support true foreground service)"""
         try:
             activity = PythonActivity.mActivity
             context = activity.getApplicationContext()
@@ -324,64 +324,53 @@ class EmailAlertApp(App):
                 channel = NotificationChannel(
                     channel_id,
                     "Email Alerts",
-                    NotificationManager.IMPORTANCE_HIGH
+                    NotificationManager.IMPORTANCE_DEFAULT
                 )
                 channel.setDescription("Email monitoring alerts")
                 notification_manager.createNotificationChannel(channel)
-                print("[Foreground] Notification channel created")
+                print("[Notification] Channel created")
             except Exception as e:
-                print(f"[Foreground] Channel creation error (may be old Android): {e}")
+                print(f"[Notification] Channel error (may be old Android): {e}")
 
-            # Create notification
-            notification_builder = NotificationBuilder(context, channel_id)
+            # Create notification builder
+            try:
+                notification_builder = NotificationBuilder(context, channel_id)
+            except:
+                # Fallback for old Android
+                notification_builder = NotificationBuilder(context)
+
             notification_builder.setContentTitle("Email Monitor Running")
             notification_builder.setContentText("Monitoring for email alerts...")
             notification_builder.setSmallIcon(context.getApplicationInfo().icon)
             notification_builder.setOngoing(True)  # Can't be dismissed
+            notification_builder.setAutoCancel(False)
 
             notification = notification_builder.build()
 
-            # Start foreground
-            try:
-                from jnius import cast
-                service = cast('android.app.Service', activity)
-                service.startForeground(self.notification_id, notification)
-                print("[Foreground] ✓ Service started")
-                self.foreground_running = True
-            except Exception as e:
-                print(f"[Foreground] startForeground error: {e}")
-                # Fallback: just show notification
-                notification_manager.notify(self.notification_id, notification)
-                self.foreground_running = True
-                print("[Foreground] ✓ Notification shown (fallback)")
+            # Show persistent notification
+            notification_manager.notify(self.notification_id, notification)
+            self.foreground_running = True
+            print("[Notification] ✓ Persistent notification shown")
 
         except Exception as e:
-            print(f"[Foreground] Start FAILED: {e}")
+            print(f"[Notification] FAILED: {e}")
             import traceback
             traceback.print_exc()
+            self.foreground_running = False
 
     def stop_foreground_service(self):
-        """Stop foreground service"""
+        """Remove persistent notification"""
         try:
             activity = PythonActivity.mActivity
             context = activity.getApplicationContext()
 
-            try:
-                from jnius import cast
-                service = cast('android.app.Service', activity)
-                service.stopForeground(True)
-                print("[Foreground] ✓ Service stopped")
-            except Exception as e:
-                print(f"[Foreground] stopForeground error: {e}")
-                # Fallback: cancel notification
-                notification_manager = context.getSystemService(Context.NOTIFICATION_SERVICE)
-                notification_manager.cancel(self.notification_id)
-                print("[Foreground] ✓ Notification cancelled (fallback)")
-
+            notification_manager = context.getSystemService(Context.NOTIFICATION_SERVICE)
+            notification_manager.cancel(self.notification_id)
             self.foreground_running = False
+            print("[Notification] ✓ Notification cancelled")
 
         except Exception as e:
-            print(f"[Foreground] Stop FAILED: {e}")
+            print(f"[Notification] Stop FAILED: {e}")
 
     def on_duration_change(self, instance, value):
         """Handle alert duration slider change"""
@@ -538,43 +527,82 @@ class EmailAlertApp(App):
             self.update_status("Disconnected", (1, 0.5, 0, 1))
 
     def monitor_loop(self):
-        """Monitor server for alerts using SSE"""
-        try:
-            url = f"{self.server_url}/events"
+        """Monitor server for alerts using SSE with auto-reconnect"""
+        retry_count = 0
+        max_retries = 999  # Essentially unlimited retries
 
-            # Use SSE to receive real-time alerts
-            response = requests.get(url, stream=True, timeout=30)
+        while self.running and retry_count < max_retries:
+            try:
+                url = f"{self.server_url}/events"
 
-            if response.status_code == 200:
-                Clock.schedule_once(lambda dt: self.update_status("Connected", (0, 1, 0, 1)))
+                if retry_count > 0:
+                    wait_time = min(5, retry_count)  # Wait up to 5 seconds between retries
+                    print(f"[SSE] Reconnecting in {wait_time}s (attempt {retry_count + 1})...")
+                    Clock.schedule_once(lambda dt: self.update_status(f"Reconnecting... ({retry_count + 1})", (1, 0.8, 0, 1)))
+                    time.sleep(wait_time)
 
-                for line in response.iter_lines():
-                    if not self.running:
+                print(f"[SSE] Connecting to {url}")
+                # Use SSE to receive real-time alerts
+                response = requests.get(url, stream=True, timeout=30)
+
+                if response.status_code == 200:
+                    retry_count = 0  # Reset retry counter on successful connection
+                    Clock.schedule_once(lambda dt: self.update_status("Connected", (0, 1, 0, 1)))
+                    print("[SSE] ✓ Connected successfully")
+
+                    for line in response.iter_lines():
+                        if not self.running:
+                            print("[SSE] Disconnecting (user requested)")
+                            break
+
+                        if line:
+                            line = line.decode('utf-8')
+                            print(f"[SSE] Received line: {line}")
+
+                            # Parse SSE event
+                            if line.startswith('data: '):
+                                try:
+                                    json_str = line[6:]
+                                    print(f"[SSE] Parsing JSON: {json_str}")
+                                    data = json.loads(json_str)
+                                    print(f"[SSE] ✓ Parsed data: {data}")
+                                    Clock.schedule_once(lambda dt, d=data: self.handle_alert(d))
+                                except Exception as e:
+                                    print(f"[SSE] ✗ JSON parse error: {e}")
+                                    print(f"[SSE] Raw line was: {repr(line)}")
+
+                    # Connection ended normally
+                    if self.running:
+                        print("[SSE] Connection closed by server, will retry")
+                        retry_count += 1
+                    else:
+                        print("[SSE] Connection closed by user")
                         break
+                else:
+                    print(f"[SSE] ✗ HTTP {response.status_code}")
+                    Clock.schedule_once(lambda dt: self.update_status(f"Failed: {response.status_code}", (1, 0, 0, 1)))
+                    retry_count += 1
 
-                    if line:
-                        line = line.decode('utf-8')
+            except requests.exceptions.Timeout:
+                print("[SSE] ✗ Timeout")
+                Clock.schedule_once(lambda dt: self.update_status("Timeout, retrying...", (1, 0.5, 0, 1)))
+                retry_count += 1
+            except requests.exceptions.ConnectionError as e:
+                print(f"[SSE] ✗ Connection error: {e}")
+                Clock.schedule_once(lambda dt: self.update_status("Connection lost, retrying...", (1, 0.5, 0, 1)))
+                retry_count += 1
+            except Exception as e:
+                print(f"[SSE] ✗ Unexpected error: {e}")
+                Clock.schedule_once(lambda dt: self.update_status(f"Error: {str(e)}", (1, 0, 0, 1)))
+                retry_count += 1
+                import traceback
+                traceback.print_exc()
 
-                        # Parse SSE event
-                        if line.startswith('data: '):
-                            try:
-                                data = json.loads(line[6:])
-                                Clock.schedule_once(lambda dt, d=data: self.handle_alert(d))
-                            except:
-                                pass
-            else:
-                Clock.schedule_once(lambda dt: self.update_status(f"Failed: {response.status_code}", (1, 0, 0, 1)))
-
-        except requests.exceptions.Timeout:
-            Clock.schedule_once(lambda dt: self.update_status("Timeout", (1, 0, 0, 1)))
-        except requests.exceptions.ConnectionError:
-            Clock.schedule_once(lambda dt: self.update_status("Cannot connect", (1, 0, 0, 1)))
-        except Exception as e:
-            Clock.schedule_once(lambda dt: self.update_status(f"Error: {str(e)}", (1, 0, 0, 1)))
-        finally:
-            if self.connected:
-                self.connected = False
-                Clock.schedule_once(lambda dt: self.reset_connection())
+        # Final cleanup
+        if self.connected:
+            self.connected = False
+            Clock.schedule_once(lambda dt: self.reset_connection())
+            print("[SSE] Monitor loop ended")
 
     def handle_alert(self, data):
         """Handle incoming alert"""
