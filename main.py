@@ -100,21 +100,22 @@ class EmailAlertApp(App):
 
         # Create scrollable content area
         scroll = ScrollView(size_hint_y=0.92)
-        layout = BoxLayout(orientation='vertical', padding=10, spacing=10, size_hint_y=None)
+        layout = BoxLayout(orientation='vertical', padding=15, spacing=15, size_hint_y=None)
         layout.bind(minimum_height=layout.setter('height'))
         scroll.add_widget(layout)
 
         # Status
         self.status_label = Label(
             text='Disconnected',
-            font_size='18sp',
-            size_hint_y=0.08,
+            font_size='20sp',
+            size_hint_y=None,
+            height=45,
             color=(1, 0.5, 0, 1)
         )
         layout.add_widget(self.status_label)
 
         # Server URL input
-        url_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=50, spacing=10)
+        url_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=55, spacing=10)
         url_layout.add_widget(Label(text='Server:', size_hint_x=0.25, color=(1, 1, 1, 1)))
         self.url_input = TextInput(
             text='http://10.0.0.170:8080',
@@ -127,17 +128,17 @@ class EmailAlertApp(App):
         # Settings section
         settings_label = Label(
             text='Settings',
-            font_size='18sp',
+            font_size='20sp',
             size_hint_y=None,
-            height=30,
+            height=40,
             color=(0.8, 0.8, 1, 1),
             bold=True
         )
         layout.add_widget(settings_label)
 
         # Foreground service toggle
-        foreground_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=40, spacing=10)
-        foreground_layout.add_widget(Label(text='Background Service:', size_hint_x=0.6, color=(1, 1, 1, 1)))
+        foreground_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=50, spacing=10)
+        foreground_layout.add_widget(Label(text='Background Service:', size_hint_x=0.6, color=(1, 1, 1, 1), font_size='16sp'))
         self.foreground_btn = Button(
             text='OFF',
             size_hint_x=0.4,
@@ -149,9 +150,9 @@ class EmailAlertApp(App):
         layout.add_widget(foreground_layout)
 
         # Alert duration slider
-        duration_label_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=30)
-        duration_label_layout.add_widget(Label(text='Alert Duration:', size_hint_x=0.6, color=(1, 1, 1, 1)))
-        self.duration_value_label = Label(text=f'{self.alert_duration}s', size_hint_x=0.4, color=(1, 1, 1, 1))
+        duration_label_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=35)
+        duration_label_layout.add_widget(Label(text='Alert Duration:', size_hint_x=0.6, color=(1, 1, 1, 1), font_size='16sp'))
+        self.duration_value_label = Label(text=f'{self.alert_duration}s', size_hint_x=0.4, color=(1, 1, 1, 1), font_size='16sp')
         duration_label_layout.add_widget(self.duration_value_label)
         layout.add_widget(duration_label_layout)
 
@@ -162,7 +163,7 @@ class EmailAlertApp(App):
             value=self.alert_duration,
             step=5,
             size_hint_y=None,
-            height=40
+            height=50
         )
         self.duration_slider.bind(value=self.on_duration_change)
         layout.add_widget(self.duration_slider)
@@ -171,7 +172,7 @@ class EmailAlertApp(App):
         ringtone_btn = Button(
             text='Select Custom Ringtone',
             size_hint_y=None,
-            height=50,
+            height=55,
             background_color=(0.3, 0.5, 0.7, 1),
             background_normal=''
         )
@@ -180,23 +181,24 @@ class EmailAlertApp(App):
 
         self.ringtone_label = Label(
             text='Using: Default Beep',
-            font_size='12sp',
+            font_size='14sp',
             size_hint_y=None,
-            height=25,
+            height=30,
             color=(0.7, 0.7, 0.7, 1)
         )
         layout.add_widget(self.ringtone_label)
 
         # Separator
-        layout.add_widget(Label(text='', size_hint_y=None, height=10))
+        layout.add_widget(Label(text='', size_hint_y=None, height=15))
 
         # Buttons
-        btn_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=60, spacing=10)
+        btn_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=65, spacing=10)
 
         self.connect_btn = Button(
             text='Connect',
             background_color=(0.2, 0.6, 0.2, 1),
-            background_normal=''
+            background_normal='',
+            font_size='16sp'
         )
         self.connect_btn.bind(on_press=self.toggle_connection)
         btn_layout.add_widget(self.connect_btn)
@@ -204,7 +206,8 @@ class EmailAlertApp(App):
         test_btn = Button(
             text='Test Alert',
             background_color=(0.6, 0.4, 0, 1),
-            background_normal=''
+            background_normal='',
+            font_size='16sp'
         )
         test_btn.bind(on_press=self.test_alert)
         btn_layout.add_widget(test_btn)
@@ -216,7 +219,7 @@ class EmailAlertApp(App):
             text='Alerts: 0',
             font_size='20sp',
             size_hint_y=None,
-            height=40,
+            height=45,
             color=(1, 1, 1, 1)
         )
         layout.add_widget(self.count_label)
@@ -224,20 +227,20 @@ class EmailAlertApp(App):
         # Alert log
         log_label = Label(
             text='Alert Log:',
-            font_size='16sp',
+            font_size='18sp',
             size_hint_y=None,
-            height=30,
+            height=35,
             color=(0.8, 0.8, 0.8, 1)
         )
         layout.add_widget(log_label)
 
-        log_scroll = ScrollView(size_hint_y=None, height=200)
+        log_scroll = ScrollView(size_hint_y=None, height=250)
         self.log_label = Label(
             text='No alerts yet',
-            font_size='14sp',
+            font_size='15sp',
             size_hint_y=None,
             color=(0.7, 0.7, 0.7, 1),
-            text_size=(Window.width - 60, None),
+            text_size=(Window.width - 80, None),
             halign='left',
             valign='top'
         )
@@ -655,27 +658,60 @@ class EmailAlertApp(App):
             print(f"[Desktop Alert] {title}: {message}")
 
     def vibrate_long(self):
-        """Vibrate for configured duration - keep checking alert_active"""
+        """Vibrate for configured duration - using VibrationEffect for lockscreen persistence"""
         if not self.vibrator:
             return
 
         try:
-            cycles = int(self.alert_duration / 0.8)  # Calculate cycles based on duration
-            print(f"[Vibrate] Starting {self.alert_duration}s vibration ({cycles} cycles)")
-            # Simple loop - more reliable on vivo
-            for i in range(cycles):
-                if not self.alert_active:
-                    print("[Vibrate] Stopped by alert_active flag")
-                    break
-                try:
-                    self.vibrator.vibrate(500)  # Vibrate for 500ms
-                    time.sleep(0.8)  # Total cycle: 0.8s (500ms vibrate + 300ms pause)
-                except Exception as e:
-                    print(f"[Vibrate] Cycle error: {e}")
-                    break
-            print("[Vibrate] Completed")
+            print(f"[Vibrate] Starting {self.alert_duration}s vibration")
+
+            # Try using VibrationEffect for Android O+ (API 26+)
+            try:
+                VibrationEffect = autoclass('android.os.VibrationEffect')
+                AudioAttributes = autoclass('android.media.AudioAttributes')
+
+                # Create a repeating vibration pattern: 500ms on, 300ms off
+                pattern = [0, 500, 300]  # Start immediately, vibrate 500ms, pause 300ms
+
+                # Create VibrationEffect with USAGE_ALARM for highest priority
+                effect = VibrationEffect.createWaveform(pattern, 0)  # 0 = repeat from index 0
+
+                # Create AudioAttributes for ALARM usage
+                attrs = AudioAttributes.Builder() \
+                    .setUsage(AudioAttributes.USAGE_ALARM) \
+                    .build()
+
+                # Start vibration with alarm audio attributes
+                self.vibrator.vibrate(effect, attrs)
+                print(f"[Vibrate] ✓ VibrationEffect started with USAGE_ALARM")
+
+                # Keep thread alive for the configured duration
+                time.sleep(self.alert_duration)
+
+                # Stop vibration
+                self.vibrator.cancel()
+                print("[Vibrate] ✓ Completed and cancelled")
+
+            except Exception as e:
+                # Fallback to simple loop for older Android
+                print(f"[Vibrate] VibrationEffect not available, using fallback: {e}")
+                cycles = int(self.alert_duration / 0.8)
+                for i in range(cycles):
+                    if not self.alert_active:
+                        print("[Vibrate] Stopped by alert_active flag")
+                        break
+                    try:
+                        self.vibrator.vibrate(500)
+                        time.sleep(0.8)
+                    except Exception as ve:
+                        print(f"[Vibrate] Cycle error: {ve}")
+                        break
+                print("[Vibrate] Fallback completed")
+
         except Exception as e:
             print(f"[Vibrate Error] {e}")
+            import traceback
+            traceback.print_exc()
         finally:
             self.alert_active = False
 
