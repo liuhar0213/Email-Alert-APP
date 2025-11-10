@@ -311,49 +311,53 @@ class EmailAlertApp(App):
             self.foreground_btn.background_color = (0.5, 0.5, 0.5, 1)
 
     def start_foreground_service(self):
-        """Show persistent notification (Kivy doesn't support true foreground service)"""
+        """Show HIGH-PRIORITY persistent notification for background monitoring"""
         try:
             activity = PythonActivity.mActivity
             context = activity.getApplicationContext()
 
-            # Create notification channel (required for Android O+)
-            channel_id = "email_alert_channel"
+            # Create HIGH-PRIORITY notification channel for foreground service
+            channel_id = "foreground_monitor_channel"
             notification_manager = context.getSystemService(Context.NOTIFICATION_SERVICE)
 
             try:
                 channel = NotificationChannel(
                     channel_id,
-                    "Email Alerts",
-                    NotificationManager.IMPORTANCE_DEFAULT
+                    "Background Monitoring",
+                    NotificationManager.IMPORTANCE_LOW  # LOW = minimal disturbance but keeps alive
                 )
-                channel.setDescription("Email monitoring alerts")
+                channel.setDescription("Keeps app running to monitor email alerts")
+                channel.setSound(None, None)  # No sound for this notification
                 notification_manager.createNotificationChannel(channel)
-                print("[Notification] Channel created")
+                print("[ForegroundService] Channel created")
             except Exception as e:
-                print(f"[Notification] Channel error (may be old Android): {e}")
+                print(f"[ForegroundService] Channel error: {e}")
 
             # Create notification builder
             try:
                 notification_builder = NotificationBuilder(context, channel_id)
             except:
-                # Fallback for old Android
                 notification_builder = NotificationBuilder(context)
 
-            notification_builder.setContentTitle("Email Monitor Running")
-            notification_builder.setContentText("Monitoring for email alerts...")
+            notification_builder.setContentTitle("📧 Email Monitor Active")
+            notification_builder.setContentText(f"Connected to {self.server_url} - Monitoring alerts")
             notification_builder.setSmallIcon(context.getApplicationInfo().icon)
-            notification_builder.setOngoing(True)  # Can't be dismissed
+            notification_builder.setOngoing(True)  # Cannot be dismissed - CRITICAL
             notification_builder.setAutoCancel(False)
+            notification_builder.setPriority(1)  # PRIORITY_LOW
+            notification_builder.setCategory("service")
 
             notification = notification_builder.build()
+            notification.flags |= 0x00000020  # FLAG_NO_CLEAR - prevents swipe-to-dismiss
 
             # Show persistent notification
             notification_manager.notify(self.notification_id, notification)
             self.foreground_running = True
-            print("[Notification] ✓ Persistent notification shown")
+            print("[ForegroundService] ✓ HIGH-PRIORITY persistent notification shown")
+            print("[ForegroundService] This keeps app alive in background on vivo!")
 
         except Exception as e:
-            print(f"[Notification] FAILED: {e}")
+            print(f"[ForegroundService] FAILED: {e}")
             import traceback
             traceback.print_exc()
             self.foreground_running = False
@@ -516,6 +520,10 @@ class EmailAlertApp(App):
             self.connect_btn.background_color = (0.8, 0.2, 0.2, 1)
             self.update_status("Connecting...", (1, 0.8, 0, 1))
 
+            # CRITICAL: Start foreground service to prevent vivo from killing app
+            if ANDROID_AVAILABLE:
+                self.start_foreground_service()
+
             # Start BOTH SSE monitoring and polling threads for vivo reliability
             sse_thread = threading.Thread(target=self.monitor_loop, daemon=True)
             sse_thread.start()
@@ -529,6 +537,10 @@ class EmailAlertApp(App):
             self.connect_btn.text = 'Connect'
             self.connect_btn.background_color = (0.2, 0.6, 0.2, 1)
             self.update_status("Disconnected", (1, 0.5, 0, 1))
+
+            # Stop foreground service when disconnecting
+            if ANDROID_AVAILABLE and self.foreground_running:
+                self.stop_foreground_service()
 
     def monitor_loop(self):
         """Monitor server for alerts using SSE with auto-reconnect"""
