@@ -170,9 +170,10 @@ class EmailAlertApp(App):
             self.ringtone = RingtoneManager.getRingtone(activity, alarm_uri)
 
             # Get PowerManager and create WakeLock
+            # Use SCREEN_DIM_WAKE_LOCK to keep screen slightly on (works better on vivo)
             power_manager = context.getSystemService(Context.POWER_SERVICE)
             self.wake_lock = power_manager.newWakeLock(
-                PowerManager.PARTIAL_WAKE_LOCK,
+                PowerManager.SCREEN_DIM_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP,
                 "EmailAlert::AlertWakeLock"
             )
 
