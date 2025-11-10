@@ -40,6 +40,8 @@ if platform == 'android':
         Vibrator = autoclass('android.os.Vibrator')
         RingtoneManager = autoclass('android.media.RingtoneManager')
         PowerManager = autoclass('android.os.PowerManager')
+        AudioManager = autoclass('android.media.AudioManager')
+        MediaPlayer = autoclass('android.media.MediaPlayer')
 
         ANDROID_AVAILABLE = True
     except Exception as e:
@@ -59,6 +61,8 @@ class EmailAlertApp(App):
         self.vibrator = None
         self.ringtone = None
         self.wake_lock = None
+        self.audio_manager = None
+        self.alert_active = False
 
     def build(self):
         """Build the UI"""
@@ -177,6 +181,9 @@ class EmailAlertApp(App):
                 "EmailAlert::AlertWakeLock"
             )
 
+            # Get AudioManager
+            self.audio_manager = context.getSystemService(Context.AUDIO_SERVICE)
+
             print("[Android] Initialized successfully")
         except Exception as e:
             print(f"[Android] Init failed: {e}")
@@ -268,10 +275,25 @@ class EmailAlertApp(App):
         print(f"[Alert] {title}")
 
         if ANDROID_AVAILABLE:
+            self.alert_active = True
+
             # Acquire wake lock to keep device awake during alert
             if self.wake_lock and not self.wake_lock.isHeld():
                 self.wake_lock.acquire(75000)  # 75 seconds (70s alert + 5s buffer)
                 print("[Wake] Lock acquired")
+
+            # Keep audio focus to prevent system from sleeping
+            # This is more reliable on vivo than wake lock alone
+            if self.audio_manager:
+                try:
+                    self.audio_manager.requestAudioFocus(
+                        None,
+                        AudioManager.STREAM_ALARM,
+                        AudioManager.AUDIOFOCUS_GAIN
+                    )
+                    print("[Audio] Focus acquired")
+                except Exception as e:
+                    print(f"[Audio] Focus failed: {e}")
 
             # Vibrate for 70 seconds in background thread
             threading.Thread(target=self.vibrate_long, daemon=True).start()
@@ -282,50 +304,61 @@ class EmailAlertApp(App):
             print(f"[Desktop Alert] {title}: {message}")
 
     def vibrate_long(self):
-        """Vibrate for 70 seconds"""
+        """Vibrate for 70 seconds - keep checking alert_active"""
         if not self.vibrator:
             return
 
         try:
-            # Vibrate pattern: 500ms on, 300ms off, repeat for 70 seconds
-            pattern = [0, 500, 300] * 87  # 87 cycles ≈ 70 seconds
-            if hasattr(self.vibrator, 'vibrate'):
-                # Try new API (array)
+            print("[Vibrate] Starting 70-second vibration")
+            # Simple loop - more reliable on vivo
+            for i in range(87):  # 87 cycles ≈ 70 seconds
+                if not self.alert_active:
+                    print("[Vibrate] Stopped by alert_active flag")
+                    break
                 try:
-                    from jnius import cast
-                    from array import array
-                    long_array = array('l', pattern)
-                    self.vibrator.vibrate(long_array, -1)
-                except:
-                    # Fallback: simple vibration
-                    for _ in range(87):
-                        if not self.running:
-                            break
-                        try:
-                            self.vibrator.vibrate(500)
-                            time.sleep(0.8)
-                        except:
-                            break
+                    self.vibrator.vibrate(500)  # Vibrate for 500ms
+                    time.sleep(0.8)  # Total cycle: 0.8s (500ms vibrate + 300ms pause)
+                except Exception as e:
+                    print(f"[Vibrate] Cycle error: {e}")
+                    break
+            print("[Vibrate] Completed")
         except Exception as e:
             print(f"[Vibrate Error] {e}")
+        finally:
+            self.alert_active = False
 
     def play_alarm_long(self):
-        """Play alarm sound for 70 seconds"""
+        """Play alarm sound for 70 seconds - keep looping"""
         if not self.ringtone:
             return
 
         try:
-            # Play for 70 seconds
-            end_time = time.time() + 70
-            while time.time() < end_time and self.running:
-                if hasattr(self.ringtone, 'play'):
-                    self.ringtone.play()
-                time.sleep(5)  # Ringtone duration
+            print("[Sound] Starting alarm")
+            # Set to loop mode if possible
+            if hasattr(self.ringtone, 'setLooping'):
+                self.ringtone.setLooping(True)
 
+            # Play alarm
+            if hasattr(self.ringtone, 'play'):
+                self.ringtone.play()
+
+            # Keep playing for 70 seconds
+            time.sleep(70)
+
+            # Stop
             if hasattr(self.ringtone, 'stop'):
                 self.ringtone.stop()
+            print("[Sound] Stopped")
         except Exception as e:
             print(f"[Sound Error] {e}")
+        finally:
+            # Release audio focus
+            if self.audio_manager:
+                try:
+                    self.audio_manager.abandonAudioFocus(None)
+                    print("[Audio] Focus released")
+                except:
+                    pass
 
     def test_alert(self, instance):
         """Test alert functionality"""
