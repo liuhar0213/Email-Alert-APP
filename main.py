@@ -516,9 +516,13 @@ class EmailAlertApp(App):
             self.connect_btn.background_color = (0.8, 0.2, 0.2, 1)
             self.update_status("Connecting...", (1, 0.8, 0, 1))
 
-            # Start monitoring thread
-            thread = threading.Thread(target=self.monitor_loop, daemon=True)
-            thread.start()
+            # Start BOTH SSE monitoring and polling threads for vivo reliability
+            sse_thread = threading.Thread(target=self.monitor_loop, daemon=True)
+            sse_thread.start()
+
+            poll_thread = threading.Thread(target=self.poll_loop, daemon=True)
+            poll_thread.start()
+            print("[Init] Started SSE + Polling hybrid mode for vivo")
         else:
             self.running = False
             self.connected = False
@@ -603,6 +607,59 @@ class EmailAlertApp(App):
             self.connected = False
             Clock.schedule_once(lambda dt: self.reset_connection())
             print("[SSE] Monitor loop ended")
+
+    def poll_loop(self):
+        """Polling fallback for vivo phones - checks every 5 seconds"""
+        print("[Poll] Starting polling thread (5s interval)")
+        processed_timestamps = set()  # Track processed alerts to avoid duplicates
+
+        while self.running:
+            try:
+                time.sleep(5)  # Poll every 5 seconds
+
+                if not self.running:
+                    break
+
+                url = f"{self.server_url}/poll"
+                print(f"[Poll] Checking {url}")
+
+                response = requests.get(url, timeout=10)
+
+                if response.status_code == 200:
+                    data = response.json()
+                    alerts = data.get('alerts', [])
+
+                    if alerts:
+                        print(f"[Poll] ✓ Received {len(alerts)} alert(s)")
+
+                        for alert in alerts:
+                            # Use timestamp to avoid duplicate processing
+                            timestamp = alert.get('timestamp', time.time())
+
+                            if timestamp not in processed_timestamps:
+                                processed_timestamps.add(timestamp)
+                                print(f"[Poll] Processing alert: {alert.get('subject')}")
+                                Clock.schedule_once(lambda dt, a=alert: self.handle_alert(a))
+
+                                # Keep processed set size limited
+                                if len(processed_timestamps) > 100:
+                                    oldest = min(processed_timestamps)
+                                    processed_timestamps.remove(oldest)
+                    else:
+                        print("[Poll] No new alerts")
+                else:
+                    print(f"[Poll] ✗ HTTP {response.status_code}")
+
+            except requests.exceptions.Timeout:
+                print("[Poll] Timeout (will retry)")
+            except requests.exceptions.ConnectionError as e:
+                print(f"[Poll] Connection error: {e}")
+            except Exception as e:
+                print(f"[Poll] Error: {e}")
+                import traceback
+                traceback.print_exc()
+
+        print("[Poll] Polling loop ended")
 
     def handle_alert(self, data):
         """Handle incoming alert"""
