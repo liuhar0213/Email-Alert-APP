@@ -1,20 +1,22 @@
-  title = Email Alert
-  package.name = emailalert
-  package.domain = com.emailmonitor
-  source.dir = .
-  source.include_exts = py,png,jpg,kv,atlas
-  version = 1.0
+[app]
 
-  requirements = python3,kivy,requests
+title = Email Alert
+package.name = emailalert
+package.domain = com.emailmonitor
+source.dir = .
+source.include_exts = py,png,jpg,kv,atlas
+version = 1.0
 
-  android.permissions = INTERNET,VIBRATE,WAKE_LOCK
-  android.api = 29
-  android.minapi = 21
-  android.archs = arm64-v8a
+requirements = python3,kivy,requests
 
-  orientation = portrait
-  fullscreen = 0
+android.permissions = INTERNET,VIBRATE,WAKE_LOCK
+android.api = 29
+android.minapi = 21
+android.archs = arm64-v8a
 
-  [buildozer]
-  log_level = 2
-  warn_on_root = 1
+orientation = portrait
+fullscreen = 0
+
+[buildozer]
+log_level = 2
+warn_on_root = 1
