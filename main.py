@@ -732,13 +732,17 @@ class EmailAlertApp(App):
 
             print(f"\n[Alert] Starting vibration and sound threads ({self.alert_duration}s)...")
 
-            # Vibrate for configured duration in background thread
+            # DUAL VIBRATION STRATEGY for vivo lockscreen:
+            # 1. Direct Vibrator calls (works when unlocked)
             threading.Thread(target=self.vibrate_long, daemon=True, name="VibrateThread").start()
 
-            # Play alarm sound for configured duration in background thread
+            # 2. Notification-based vibration (system-level, works when locked)
+            threading.Thread(target=self.vibrate_via_notification, daemon=True, name="NotificationVibrateThread").start()
+
+            # 3. Play alarm sound for configured duration in background thread
             threading.Thread(target=self.play_alarm_long, daemon=True, name="SoundThread").start()
 
-            print(f"[Alert] Both threads started!\n")
+            print(f"[Alert] All 3 threads started (Direct Vibrate + Notification Vibrate + Sound)!\n")
         else:
             print(f"[Desktop Alert] {title}: {message}")
 
@@ -871,6 +875,99 @@ class EmailAlertApp(App):
                     print("[Audio] Focus released")
                 except:
                     pass
+
+    def vibrate_via_notification(self):
+        """Use system notification vibration for lockscreen - more reliable on vivo"""
+        if not ANDROID_AVAILABLE:
+            return
+
+        try:
+            print("[NotifVibrate] Starting NOTIFICATION-BASED vibration")
+
+            activity = PythonActivity.mActivity
+            context = activity.getApplicationContext()
+            notification_manager = context.getSystemService(Context.NOTIFICATION_SERVICE)
+
+            # Create high-priority notification channel with vibration
+            channel_id = "vibration_alert_channel"
+            try:
+                NotificationChannel = autoclass('android.app.NotificationChannel')
+                NotificationManager = autoclass('android.app.NotificationManager')
+
+                channel = NotificationChannel(
+                    channel_id,
+                    "Alert Vibrations",
+                    NotificationManager.IMPORTANCE_HIGH  # HIGH importance for lockscreen
+                )
+                channel.setDescription("Vibration alerts for email monitoring")
+                channel.enableVibration(True)
+
+                # Create AGGRESSIVE vibration pattern for vivo
+                # Format: [delay, vibrate, sleep, vibrate, sleep, ...]
+                # Total duration: alert_duration seconds
+                pattern_cycles = int(self.alert_duration / 0.4)  # 400ms cycles
+                vibration_pattern = []
+                for i in range(pattern_cycles):
+                    vibration_pattern.extend([0, 300, 100])  # 300ms vibrate, 100ms pause
+
+                channel.setVibrationPattern(vibration_pattern)
+                channel.setSound(None, None)  # No sound, only vibration
+                channel.setBypassDnd(True)  # Bypass Do Not Disturb
+                channel.setLockscreenVisibility(1)  # Show on lockscreen
+
+                notification_manager.createNotificationChannel(channel)
+                print("[NotifVibrate] High-priority vibration channel created")
+
+            except Exception as e:
+                print(f"[NotifVibrate] Channel creation error (old Android?): {e}")
+
+            # Create notification with vibration
+            try:
+                NotificationBuilder = autoclass('android.app.Notification$Builder')
+                try:
+                    builder = NotificationBuilder(context, channel_id)
+                except:
+                    builder = NotificationBuilder(context)
+
+                builder.setContentTitle("⚠️ EMAIL ALERT")
+                builder.setContentText("Check your email immediately")
+                builder.setSmallIcon(context.getApplicationInfo().icon)
+                builder.setPriority(2)  # PRIORITY_MAX
+                builder.setCategory("alarm")
+                builder.setVisibility(1)  # VISIBILITY_PUBLIC
+                builder.setOngoing(False)
+                builder.setAutoCancel(True)
+
+                # Set aggressive vibration pattern directly on notification
+                pattern_cycles = int(self.alert_duration / 0.4)
+                vibration_pattern = []
+                for i in range(pattern_cycles):
+                    vibration_pattern.extend([0, 300, 100])
+
+                builder.setVibrate(vibration_pattern)
+
+                # Build and show notification
+                notification = builder.build()
+                notification_id = 9999  # Unique ID for vibration notification
+                notification_manager.notify(notification_id, notification)
+                print(f"[NotifVibrate] ✓ Notification posted with {pattern_cycles} vibration cycles")
+
+                # Wait for vibration to complete
+                time.sleep(self.alert_duration)
+
+                # Cancel notification after vibration completes
+                notification_manager.cancel(notification_id)
+                print("[NotifVibrate] ✓ Notification cancelled, vibration complete")
+
+            except Exception as e:
+                print(f"[NotifVibrate] Notification build/post error: {e}")
+                import traceback
+                traceback.print_exc()
+
+        except Exception as e:
+            print(f"[NotifVibrate] ERROR: {e}")
+            import traceback
+            traceback.print_exc()
 
     def test_alert(self, instance):
         """Test alert functionality"""
