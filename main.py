@@ -877,95 +877,124 @@ class EmailAlertApp(App):
                     pass
 
     def vibrate_via_notification(self):
-        """Use system notification vibration for lockscreen - more reliable on vivo"""
+        """Use Full-Screen Intent notification for lockscreen - ULTIMATE method"""
         if not ANDROID_AVAILABLE:
             return
 
         try:
-            print("[NotifVibrate] Starting NOTIFICATION-BASED vibration")
+            print("[FullScreenVibrate] Starting FULL-SCREEN INTENT vibration (like incoming call)")
 
             activity = PythonActivity.mActivity
             context = activity.getApplicationContext()
             notification_manager = context.getSystemService(Context.NOTIFICATION_SERVICE)
 
-            # Create high-priority notification channel with vibration
-            channel_id = "vibration_alert_channel"
+            # Create ALARM-level notification channel
+            channel_id = "fullscreen_alert_channel"
             try:
                 NotificationChannel = autoclass('android.app.NotificationChannel')
                 NotificationManager = autoclass('android.app.NotificationManager')
 
+                # Use IMPORTANCE_HIGH for full-screen intents
                 channel = NotificationChannel(
                     channel_id,
-                    "Alert Vibrations",
-                    NotificationManager.IMPORTANCE_HIGH  # HIGH importance for lockscreen
+                    "Critical Alerts",
+                    NotificationManager.IMPORTANCE_HIGH
                 )
-                channel.setDescription("Vibration alerts for email monitoring")
+                channel.setDescription("Critical email alerts with full-screen notification")
                 channel.enableVibration(True)
-
-                # Create AGGRESSIVE vibration pattern for vivo
-                # Format: [delay, vibrate, sleep, vibrate, sleep, ...]
-                # Total duration: alert_duration seconds
-                pattern_cycles = int(self.alert_duration / 0.4)  # 400ms cycles
-                vibration_pattern = []
-                for i in range(pattern_cycles):
-                    vibration_pattern.extend([0, 300, 100])  # 300ms vibrate, 100ms pause
-
-                channel.setVibrationPattern(vibration_pattern)
-                channel.setSound(None, None)  # No sound, only vibration
-                channel.setBypassDnd(True)  # Bypass Do Not Disturb
+                channel.setBypassDnd(True)
                 channel.setLockscreenVisibility(1)  # Show on lockscreen
 
+                # Aggressive vibration pattern
+                pattern_cycles = int(self.alert_duration / 0.4)
+                vibration_pattern = []
+                for i in range(pattern_cycles):
+                    vibration_pattern.extend([0, 300, 100])
+                channel.setVibrationPattern(vibration_pattern)
+
                 notification_manager.createNotificationChannel(channel)
-                print("[NotifVibrate] High-priority vibration channel created")
+                print("[FullScreenVibrate] Full-screen channel created")
 
             except Exception as e:
-                print(f"[NotifVibrate] Channel creation error (old Android?): {e}")
+                print(f"[FullScreenVibrate] Channel error: {e}")
 
-            # Create notification with vibration
+            # Create Full-Screen Intent (launches app when locked)
             try:
+                Intent = autoclass('android.content.Intent')
+                PendingIntent = autoclass('android.app.PendingIntent')
+
+                # Create intent to launch main activity
+                full_screen_intent = Intent(context, PythonActivity)
+                full_screen_intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                full_screen_intent.putExtra("TRIGGERED_BY_ALERT", True)
+
+                # Create PendingIntent with FLAG_IMMUTABLE for Android 12+
+                try:
+                    pending_intent = PendingIntent.getActivity(
+                        context,
+                        0,
+                        full_screen_intent,
+                        PendingIntent.FLAG_UPDATE_CURRENT | 0x04000000  # FLAG_IMMUTABLE
+                    )
+                except:
+                    # Fallback for older Android
+                    pending_intent = PendingIntent.getActivity(
+                        context,
+                        0,
+                        full_screen_intent,
+                        PendingIntent.FLAG_UPDATE_CURRENT
+                    )
+
+                print("[FullScreenVibrate] PendingIntent created")
+
+                # Build notification with Full-Screen Intent
                 NotificationBuilder = autoclass('android.app.Notification$Builder')
                 try:
                     builder = NotificationBuilder(context, channel_id)
                 except:
                     builder = NotificationBuilder(context)
 
-                builder.setContentTitle("⚠️ EMAIL ALERT")
-                builder.setContentText("Check your email immediately")
+                builder.setContentTitle("🚨 CRITICAL EMAIL ALERT")
+                builder.setContentText("Urgent: Check your email immediately")
                 builder.setSmallIcon(context.getApplicationInfo().icon)
                 builder.setPriority(2)  # PRIORITY_MAX
                 builder.setCategory("alarm")
                 builder.setVisibility(1)  # VISIBILITY_PUBLIC
-                builder.setOngoing(False)
                 builder.setAutoCancel(True)
 
-                # Set aggressive vibration pattern directly on notification
+                # Set vibration pattern on notification
                 pattern_cycles = int(self.alert_duration / 0.4)
                 vibration_pattern = []
                 for i in range(pattern_cycles):
                     vibration_pattern.extend([0, 300, 100])
-
                 builder.setVibrate(vibration_pattern)
 
-                # Build and show notification
-                notification = builder.build()
-                notification_id = 9999  # Unique ID for vibration notification
-                notification_manager.notify(notification_id, notification)
-                print(f"[NotifVibrate] ✓ Notification posted with {pattern_cycles} vibration cycles")
+                # THE KEY: Set Full-Screen Intent (like incoming call)
+                builder.setFullScreenIntent(pending_intent, True)
 
-                # Wait for vibration to complete
+                # Build and post notification
+                notification = builder.build()
+                notification.flags |= 0x00000080  # FLAG_INSISTENT (repeating sound/vibration)
+
+                notification_id = 8888
+                notification_manager.notify(notification_id, notification)
+                print(f"[FullScreenVibrate] ✓ FULL-SCREEN notification posted!")
+                print(f"[FullScreenVibrate] This should wake screen and vibrate on lockscreen!")
+
+                # Keep notification for duration
                 time.sleep(self.alert_duration)
 
-                # Cancel notification after vibration completes
+                # Cancel notification
                 notification_manager.cancel(notification_id)
-                print("[NotifVibrate] ✓ Notification cancelled, vibration complete")
+                print("[FullScreenVibrate] ✓ Notification cancelled")
 
             except Exception as e:
-                print(f"[NotifVibrate] Notification build/post error: {e}")
+                print(f"[FullScreenVibrate] Intent/Notification error: {e}")
                 import traceback
                 traceback.print_exc()
 
         except Exception as e:
-            print(f"[NotifVibrate] ERROR: {e}")
+            print(f"[FullScreenVibrate] ERROR: {e}")
             import traceback
             traceback.print_exc()
 

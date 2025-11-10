@@ -5,11 +5,11 @@ package.name = emailalert
 package.domain = com.emailmonitor
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,wav,mp3
-version = 1.4
+version = 1.5
 
 requirements = python3,kivy,requests
 
-android.permissions = INTERNET,VIBRATE,WAKE_LOCK,FOREGROUND_SERVICE,POST_NOTIFICATIONS
+android.permissions = INTERNET,VIBRATE,WAKE_LOCK,FOREGROUND_SERVICE,POST_NOTIFICATIONS,USE_FULL_SCREEN_INTENT
 android.api = 29
 android.minapi = 21
 android.archs = arm64-v8a
