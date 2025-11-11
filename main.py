@@ -81,6 +81,11 @@ class EmailAlertApp(App):
         self.notification_id = 1
         self.foreground_running = False
 
+        # Thread tracking for auto-restart
+        self.sse_thread = None
+        self.poll_thread = None
+        self.watchdog_event = None
+
     def build(self):
         """Build the UI"""
         Window.clearcolor = (0.1, 0.1, 0.15, 1)
@@ -525,18 +530,30 @@ class EmailAlertApp(App):
                 self.start_foreground_service()
 
             # Start BOTH SSE monitoring and polling threads for vivo reliability
-            sse_thread = threading.Thread(target=self.monitor_loop, daemon=True)
-            sse_thread.start()
+            self.sse_thread = threading.Thread(target=self.monitor_loop, daemon=True)
+            self.sse_thread.start()
 
-            poll_thread = threading.Thread(target=self.poll_loop, daemon=True)
-            poll_thread.start()
+            self.poll_thread = threading.Thread(target=self.poll_loop, daemon=True)
+            self.poll_thread.start()
             print("[Init] Started SSE + Polling hybrid mode for vivo")
+
+            # Start watchdog to auto-restart dead threads (check every 30 seconds)
+            if self.watchdog_event:
+                self.watchdog_event.cancel()
+            self.watchdog_event = Clock.schedule_interval(self.check_threads, 30)
+            print("[Watchdog] Started thread monitor (30s interval)")
         else:
             self.running = False
             self.connected = False
             self.connect_btn.text = 'Connect'
             self.connect_btn.background_color = (0.2, 0.6, 0.2, 1)
             self.update_status("Disconnected", (1, 0.5, 0, 1))
+
+            # Stop watchdog
+            if self.watchdog_event:
+                self.watchdog_event.cancel()
+                self.watchdog_event = None
+                print("[Watchdog] Stopped")
 
             # Stop foreground service when disconnecting
             if ANDROID_AVAILABLE and self.foreground_running:
@@ -672,6 +689,31 @@ class EmailAlertApp(App):
                 traceback.print_exc()
 
         print("[Poll] Polling loop ended")
+
+    def check_threads(self, dt):
+        """Watchdog: Check if threads are alive and restart if dead"""
+        if not self.running:
+            return
+
+        sse_alive = self.sse_thread and self.sse_thread.is_alive()
+        poll_alive = self.poll_thread and self.poll_thread.is_alive()
+
+        if not sse_alive:
+            print("[Watchdog] ⚠ SSE thread died! Restarting...")
+            self.sse_thread = threading.Thread(target=self.monitor_loop, daemon=True)
+            self.sse_thread.start()
+            Clock.schedule_once(lambda dt: self.update_status("Auto-restarted SSE", (1, 0.8, 0, 1)))
+
+        if not poll_alive:
+            print("[Watchdog] ⚠ Poll thread died! Restarting...")
+            self.poll_thread = threading.Thread(target=self.poll_loop, daemon=True)
+            self.poll_thread.start()
+            Clock.schedule_once(lambda dt: self.update_status("Auto-restarted Polling", (1, 0.8, 0, 1)))
+
+        if not sse_alive or not poll_alive:
+            print(f"[Watchdog] Status - SSE: {'✓' if sse_alive else '✗'}, Poll: {'✓' if poll_alive else '✗'}")
+        else:
+            print(f"[Watchdog] ✓ All threads healthy")
 
     def handle_alert(self, data):
         """Handle incoming alert"""
