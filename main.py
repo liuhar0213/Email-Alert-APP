@@ -764,10 +764,16 @@ class EmailAlertApp(App):
             # Get AlarmManager
             self.alarm_manager = activity.getSystemService(Context.ALARM_SERVICE)
 
-            # Create intent for waking up (broadcasts to our app)
+            # Create intent for waking up (without showing UI)
             intent = Intent(context, PythonActivity)
             intent.setAction("com.emailmonitor.emailalert.KEEPALIVE")
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            # Use SINGLE_TOP to avoid creating new activity instances
+            # Add NO_USER_ACTION to prevent bringing app to foreground
+            intent.addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK |
+                Intent.FLAG_ACTIVITY_SINGLE_TOP |
+                Intent.FLAG_ACTIVITY_NO_USER_ACTION
+            )
 
             # Create pending intent
             self.alarm_intent = PendingIntent.getActivity(
