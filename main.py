@@ -91,6 +91,7 @@ class EmailAlertApp(App):
         self.watchdog_event = None
         self.alarm_manager = None
         self.alarm_intent = None
+        self.reschedule_event = None  # v3.5: for auto-rescheduling Doze-resistant alarms
 
     def build(self):
         """Build the UI"""
@@ -563,6 +564,12 @@ class EmailAlertApp(App):
                 self.watchdog_event = None
                 print("[Watchdog] Stopped")
 
+            # Stop reschedule event (v3.5)
+            if self.reschedule_event:
+                self.reschedule_event.cancel()
+                self.reschedule_event = None
+                print("[Reschedule] Stopped")
+
             # Stop foreground service and alarm when disconnecting
             if ANDROID_AVAILABLE:
                 self.cancel_keepalive_alarm()
@@ -753,7 +760,7 @@ class EmailAlertApp(App):
         print("[Poll] Polling loop ended")
 
     def setup_keepalive_alarm(self):
-        """Setup AlarmManager to keep app awake and polling reliable"""
+        """Setup AlarmManager to keep app awake and polling reliable - v3.5 Doze-resistant"""
         if not ANDROID_AVAILABLE:
             return
 
@@ -783,26 +790,50 @@ class EmailAlertApp(App):
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
             )
 
-            # Set repeating alarm - now 20 seconds (v3.2: poll_interval=10s)
-            # This bypasses Doze mode restrictions
-            interval_ms = int(self.poll_interval * 2 * 1000)  # 20 seconds
-            trigger_time = SystemClock.elapsedRealtime() + interval_ms
+            # Store interval for rescheduling
+            self.alarm_interval_ms = int(self.poll_interval * 2 * 1000)  # 20 seconds
 
-            # Use setRepeating for regular wake-ups
-            # Note: setExactAndAllowWhileIdle doesn't support repeating, so we use setRepeating
-            self.alarm_manager.setRepeating(
-                AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                trigger_time,
-                interval_ms,
-                self.alarm_intent
+            # Initial schedule
+            self.reschedule_exact_alarm()
+
+            # Setup auto-rescheduler: reschedule every (interval - 2) seconds to ensure continuity
+            # This ensures alarm is always rescheduled before it expires
+            reschedule_interval = max(self.poll_interval * 2 - 2, 5)  # At least 5 seconds
+            if self.reschedule_event:
+                self.reschedule_event.cancel()
+            self.reschedule_event = Clock.schedule_interval(
+                lambda dt: self.reschedule_exact_alarm(),
+                reschedule_interval
             )
 
-            print(f"[Alarm] ✓ Set repeating alarm (every {self.poll_interval * 2}s) to keep app awake")
+            print(f"[Alarm] ✓ Doze-resistant alarm initialized (every {self.poll_interval * 2}s, auto-reschedule every {reschedule_interval}s)")
 
         except Exception as e:
             print(f"[Alarm] Failed to setup: {e}")
             import traceback
             traceback.print_exc()
+
+    def reschedule_exact_alarm(self):
+        """Reschedule the exact alarm - called periodically to maintain wake-ups in Doze mode"""
+        if not ANDROID_AVAILABLE or not self.alarm_manager or not self.alarm_intent:
+            return
+
+        try:
+            # Cancel previous alarm
+            self.alarm_manager.cancel(self.alarm_intent)
+
+            # Schedule next wake using setExactAndAllowWhileIdle (Doze-resistant)
+            trigger_time = SystemClock.elapsedRealtime() + self.alarm_interval_ms
+            self.alarm_manager.setExactAndAllowWhileIdle(
+                AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                trigger_time,
+                self.alarm_intent
+            )
+
+            print(f"[Alarm] ✓ Rescheduled Doze-resistant wake in {self.alarm_interval_ms/1000}s")
+
+        except Exception as e:
+            print(f"[Alarm] Reschedule failed: {e}")
 
     def cancel_keepalive_alarm(self):
         """Cancel the keepalive alarm"""
