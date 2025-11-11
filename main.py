@@ -952,8 +952,9 @@ class EmailAlertApp(App):
             # 1. Direct Vibrator calls (works when unlocked)
             threading.Thread(target=self.vibrate_long, daemon=True, name="VibrateThread").start()
 
-            # 2. Full-Screen Intent notification (system-level)
-            threading.Thread(target=self.vibrate_via_notification, daemon=True, name="NotificationVibrateThread").start()
+            # 2. Full-Screen Intent notification (DISABLED - auto-opens app)
+            # User feedback: "email monitor老是会自动打开，影响我其他app"
+            # threading.Thread(target=self.vibrate_via_notification, daemon=True, name="NotificationVibrateThread").start()
 
             # 3. AlarmManager system alarm
             threading.Thread(target=self.vibrate_via_alarm, daemon=True, name="AlarmVibrateThread").start()
@@ -964,7 +965,7 @@ class EmailAlertApp(App):
             # 5. Play alarm sound for configured duration in background thread
             threading.Thread(target=self.play_alarm_long, daemon=True, name="SoundThread").start()
 
-            print(f"[Alert] All 5 threads started (Direct + Notification + Alarm + Wearable + Sound)!\n")
+            print(f"[Alert] 4 threads started (Direct + Alarm + Wearable + Sound - Notification disabled)!\n")
         else:
             print(f"[Desktop Alert] {title}: {message}")
 
