@@ -1191,8 +1191,9 @@ class EmailAlertApp(App):
                     vibration_pattern.extend([0, 300, 100])
                 builder.setVibrate(vibration_pattern)
 
-                # THE KEY: Set Full-Screen Intent (like incoming call)
-                builder.setFullScreenIntent(pending_intent, True)
+                # DISABLED: setFullScreenIntent would auto-open app and interrupt other apps
+                # User feedback: "不需要弹框唤醒" - alerts should play in background
+                # builder.setFullScreenIntent(pending_intent, True)
 
                 # Build and post notification
                 notification = builder.build()
@@ -1200,8 +1201,8 @@ class EmailAlertApp(App):
 
                 notification_id = 8888
                 notification_manager.notify(notification_id, notification)
-                print(f"[FullScreenVibrate] ✓ FULL-SCREEN notification posted!")
-                print(f"[FullScreenVibrate] This should wake screen and vibrate on lockscreen!")
+                print(f"[FullScreenVibrate] ✓ Notification posted (without auto-opening app)")
+                print(f"[FullScreenVibrate] Alert will play in background without interruption")
 
                 # Keep notification for duration
                 time.sleep(self.alert_duration)
