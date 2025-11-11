@@ -20,7 +20,6 @@ import json
 import threading
 import time
 from datetime import datetime
-import getui_helper
 
 # Android specific imports
 if platform == 'android':
@@ -55,14 +54,6 @@ if platform == 'android':
         AlarmManager = autoclass('android.app.AlarmManager')
         SystemClock = autoclass('android.os.SystemClock')
 
-        # 个推 SDK
-        try:
-            PushManager = autoclass('com.igexin.sdk.PushManager')
-            print("[Getui] PushManager imported successfully")
-        except Exception as e:
-            print(f"[Getui] Failed to import PushManager: {e}")
-            PushManager = None
-
         ANDROID_AVAILABLE = True
     except Exception as e:
         print(f"[Android] Import failed: {e}")
@@ -88,7 +79,7 @@ class EmailAlertApp(App):
         # Configuration
         self.alert_duration = 70  # seconds
         self.custom_ringtone_path = None
-        self.poll_interval = 30  # seconds (reduced from 5 for battery)
+        self.poll_interval = 10  # seconds (v3.2: optimized for lower latency)
 
         # Foreground service
         self.notification_id = 1
@@ -100,11 +91,6 @@ class EmailAlertApp(App):
         self.watchdog_event = None
         self.alarm_manager = None
         self.alarm_intent = None
-
-        # 个推推送相关
-        self.getui_client_id = None
-        self.getui_listener_thread = None
-        self.last_processed_timestamp = 0
 
     def build(self):
         """Build the UI"""
@@ -281,15 +267,6 @@ class EmailAlertApp(App):
             self.init_android()
 
         return main_layout
-
-    def on_start(self):
-        """Called when the app starts - initialize push notifications"""
-        if ANDROID_AVAILABLE:
-            # 初始化个推 SDK
-            print("[App] Initializing Getui Push SDK...")
-            getui_helper.init_getui(self)
-        else:
-            print("[App] Not on Android, skipping Getui initialization")
 
     def init_android(self):
         """Initialize Android specific components"""
@@ -557,10 +534,22 @@ class EmailAlertApp(App):
             # CRITICAL: Start foreground service to prevent vivo from killing app
             if ANDROID_AVAILABLE:
                 self.start_foreground_service()
+                # Setup AlarmManager to keep app awake
+                self.setup_keepalive_alarm()
 
-            # Start Getui push listener (replaces SSE + Polling)
-            getui_helper.start_push_listener(self)
-            print("[Init] Started Getui Push listener (v4.0)")
+            # Start BOTH SSE monitoring and polling threads for vivo reliability
+            self.sse_thread = threading.Thread(target=self.monitor_loop, daemon=True)
+            self.sse_thread.start()
+
+            self.poll_thread = threading.Thread(target=self.poll_loop, daemon=True)
+            self.poll_thread.start()
+            print("[Init] Started SSE + Polling hybrid mode for vivo")
+
+            # Start watchdog to auto-restart dead threads (check every 30 seconds)
+            if self.watchdog_event:
+                self.watchdog_event.cancel()
+            self.watchdog_event = Clock.schedule_interval(self.check_threads, 30)
+            print("[Watchdog] Started thread monitor (30s interval)")
         else:
             self.running = False
             self.connected = False
@@ -568,11 +557,15 @@ class EmailAlertApp(App):
             self.connect_btn.background_color = (0.2, 0.6, 0.2, 1)
             self.update_status("Disconnected", (1, 0.5, 0, 1))
 
-            # Stop Getui push listener
-            getui_helper.stop_push_listener(self)
+            # Stop watchdog
+            if self.watchdog_event:
+                self.watchdog_event.cancel()
+                self.watchdog_event = None
+                print("[Watchdog] Stopped")
 
-            # Stop foreground service when disconnecting
+            # Stop foreground service and alarm when disconnecting
             if ANDROID_AVAILABLE:
+                self.cancel_keepalive_alarm()
                 if self.foreground_running:
                     self.stop_foreground_service()
 
@@ -682,7 +675,7 @@ class EmailAlertApp(App):
                     except Exception as e:
                         print(f"[Poll] Wake lock acquire failed: {e}")
 
-                time.sleep(self.poll_interval)  # Poll every 30 seconds
+                time.sleep(self.poll_interval)  # Poll every 10 seconds (v3.2)
 
                 if not self.running:
                     break
@@ -790,9 +783,9 @@ class EmailAlertApp(App):
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
             )
 
-            # Set repeating alarm every 60 seconds using setExactAndAllowWhileIdle
+            # Set repeating alarm - now 20 seconds (v3.2: poll_interval=10s)
             # This bypasses Doze mode restrictions
-            interval_ms = int(self.poll_interval * 2 * 1000)  # 60 seconds
+            interval_ms = int(self.poll_interval * 2 * 1000)  # 20 seconds
             trigger_time = SystemClock.elapsedRealtime() + interval_ms
 
             # Use setRepeating for regular wake-ups
