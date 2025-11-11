@@ -956,8 +956,9 @@ class EmailAlertApp(App):
             # User feedback: "email monitor老是会自动打开，影响我其他app"
             # threading.Thread(target=self.vibrate_via_notification, daemon=True, name="NotificationVibrateThread").start()
 
-            # 3. AlarmManager system alarm
-            threading.Thread(target=self.vibrate_via_alarm, daemon=True, name="AlarmVibrateThread").start()
+            # 3. AlarmManager system alarm (DISABLED - setAlarmClock auto-opens app)
+            # Uses setAlarmClock() which shows alarm icon and opens app when fired
+            # threading.Thread(target=self.vibrate_via_alarm, daemon=True, name="AlarmVibrateThread").start()
 
             # 4. WEARABLE DEVICE NOTIFICATIONS (for smartwatch/band)
             threading.Thread(target=self.vibrate_via_wearable, daemon=True, name="WearableVibrateThread").start()
@@ -965,7 +966,7 @@ class EmailAlertApp(App):
             # 5. Play alarm sound for configured duration in background thread
             threading.Thread(target=self.play_alarm_long, daemon=True, name="SoundThread").start()
 
-            print(f"[Alert] 4 threads started (Direct + Alarm + Wearable + Sound - Notification disabled)!\n")
+            print(f"[Alert] 3 threads started (Direct vibration + Wearable + Sound)!\n")
         else:
             print(f"[Desktop Alert] {title}: {message}")
 
