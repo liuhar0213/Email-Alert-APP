@@ -51,6 +51,8 @@ if platform == 'android':
         PendingIntent = autoclass('android.app.PendingIntent')
         Intent = autoclass('android.content.Intent')
         Service = autoclass('android.app.Service')
+        AlarmManager = autoclass('android.app.AlarmManager')
+        SystemClock = autoclass('android.os.SystemClock')
 
         ANDROID_AVAILABLE = True
     except Exception as e:
@@ -70,12 +72,14 @@ class EmailAlertApp(App):
         self.vibrator = None
         self.media_player = None
         self.wake_lock = None
+        self.poll_wake_lock = None  # Separate wake lock for polling
         self.audio_manager = None
         self.alert_active = False
 
         # Configuration
         self.alert_duration = 70  # seconds
         self.custom_ringtone_path = None
+        self.poll_interval = 30  # seconds (reduced from 5 for battery)
 
         # Foreground service
         self.notification_id = 1
@@ -85,6 +89,8 @@ class EmailAlertApp(App):
         self.sse_thread = None
         self.poll_thread = None
         self.watchdog_event = None
+        self.alarm_manager = None
+        self.alarm_intent = None
 
     def build(self):
         """Build the UI"""
@@ -528,6 +534,8 @@ class EmailAlertApp(App):
             # CRITICAL: Start foreground service to prevent vivo from killing app
             if ANDROID_AVAILABLE:
                 self.start_foreground_service()
+                # Setup AlarmManager to keep app awake
+                self.setup_keepalive_alarm()
 
             # Start BOTH SSE monitoring and polling threads for vivo reliability
             self.sse_thread = threading.Thread(target=self.monitor_loop, daemon=True)
@@ -555,9 +563,11 @@ class EmailAlertApp(App):
                 self.watchdog_event = None
                 print("[Watchdog] Stopped")
 
-            # Stop foreground service when disconnecting
-            if ANDROID_AVAILABLE and self.foreground_running:
-                self.stop_foreground_service()
+            # Stop foreground service and alarm when disconnecting
+            if ANDROID_AVAILABLE:
+                self.cancel_keepalive_alarm()
+                if self.foreground_running:
+                    self.stop_foreground_service()
 
     def monitor_loop(self):
         """Monitor server for alerts using SSE with auto-reconnect"""
@@ -638,13 +648,34 @@ class EmailAlertApp(App):
             print("[SSE] Monitor loop ended")
 
     def poll_loop(self):
-        """Polling fallback for vivo phones - checks every 5 seconds"""
-        print("[Poll] Starting polling thread (5s interval)")
+        """Polling fallback for vivo phones - checks every 30 seconds with WakeLock"""
+        print(f"[Poll] Starting polling thread ({self.poll_interval}s interval with WakeLock)")
         processed_timestamps = set()  # Track processed alerts to avoid duplicates
+
+        # Get polling wake lock (PARTIAL_WAKE_LOCK keeps CPU awake)
+        if ANDROID_AVAILABLE and not self.poll_wake_lock:
+            try:
+                pm = PythonActivity.mActivity.getSystemService(Context.POWER_SERVICE)
+                self.poll_wake_lock = pm.newWakeLock(
+                    PowerManager.PARTIAL_WAKE_LOCK,
+                    "EmailAlert:PollWakeLock"
+                )
+                print("[Poll] ✓ Created polling wake lock")
+            except Exception as e:
+                print(f"[Poll] Failed to create wake lock: {e}")
 
         while self.running:
             try:
-                time.sleep(5)  # Poll every 5 seconds
+                # Acquire wake lock before polling
+                if self.poll_wake_lock and ANDROID_AVAILABLE:
+                    try:
+                        if not self.poll_wake_lock.isHeld():
+                            self.poll_wake_lock.acquire(int(self.poll_interval * 1.5 * 1000))  # timeout in ms
+                            print("[Poll] 🔒 Acquired wake lock")
+                    except Exception as e:
+                        print(f"[Poll] Wake lock acquire failed: {e}")
+
+                time.sleep(self.poll_interval)  # Poll every 30 seconds
 
                 if not self.running:
                     break
@@ -700,8 +731,83 @@ class EmailAlertApp(App):
                 print(f"[Poll] Error: {e}")
                 import traceback
                 traceback.print_exc()
+            finally:
+                # Release wake lock after each polling cycle
+                if self.poll_wake_lock and ANDROID_AVAILABLE:
+                    try:
+                        if self.poll_wake_lock.isHeld():
+                            self.poll_wake_lock.release()
+                            print("[Poll] 🔓 Released wake lock")
+                    except Exception as e:
+                        print(f"[Poll] Wake lock release failed: {e}")
+
+        # Cleanup on exit
+        if self.poll_wake_lock and ANDROID_AVAILABLE:
+            try:
+                if self.poll_wake_lock.isHeld():
+                    self.poll_wake_lock.release()
+                print("[Poll] ✓ Final wake lock cleanup done")
+            except:
+                pass
 
         print("[Poll] Polling loop ended")
+
+    def setup_keepalive_alarm(self):
+        """Setup AlarmManager to keep app awake and polling reliable"""
+        if not ANDROID_AVAILABLE:
+            return
+
+        try:
+            activity = PythonActivity.mActivity
+            context = activity.getApplicationContext()
+
+            # Get AlarmManager
+            self.alarm_manager = activity.getSystemService(Context.ALARM_SERVICE)
+
+            # Create intent for waking up (broadcasts to our app)
+            intent = Intent(context, PythonActivity)
+            intent.setAction("com.emailmonitor.emailalert.KEEPALIVE")
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+            # Create pending intent
+            self.alarm_intent = PendingIntent.getActivity(
+                context,
+                0,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+            )
+
+            # Set repeating alarm every 60 seconds using setExactAndAllowWhileIdle
+            # This bypasses Doze mode restrictions
+            interval_ms = int(self.poll_interval * 2 * 1000)  # 60 seconds
+            trigger_time = SystemClock.elapsedRealtime() + interval_ms
+
+            # Use setRepeating for regular wake-ups
+            # Note: setExactAndAllowWhileIdle doesn't support repeating, so we use setRepeating
+            self.alarm_manager.setRepeating(
+                AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                trigger_time,
+                interval_ms,
+                self.alarm_intent
+            )
+
+            print(f"[Alarm] ✓ Set repeating alarm (every {self.poll_interval * 2}s) to keep app awake")
+
+        except Exception as e:
+            print(f"[Alarm] Failed to setup: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def cancel_keepalive_alarm(self):
+        """Cancel the keepalive alarm"""
+        if not ANDROID_AVAILABLE or not self.alarm_manager or not self.alarm_intent:
+            return
+
+        try:
+            self.alarm_manager.cancel(self.alarm_intent)
+            print("[Alarm] ✓ Cancelled keepalive alarm")
+        except Exception as e:
+            print(f"[Alarm] Cancel failed: {e}")
 
     def check_threads(self, dt):
         """Watchdog: Check if threads are alive and restart if dead"""
