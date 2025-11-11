@@ -667,8 +667,21 @@ class EmailAlertApp(App):
 
                             if timestamp not in processed_timestamps:
                                 processed_timestamps.add(timestamp)
-                                print(f"[Poll] Processing alert: {alert.get('subject')}")
-                                Clock.schedule_once(lambda dt, a=alert: self.handle_alert(a))
+                                subject = alert.get('subject', 'Unknown')
+                                sender = alert.get('from', 'Unknown')
+                                print(f"[Poll] Processing alert: {subject}")
+
+                                # CRITICAL: Call trigger_alert DIRECTLY from background thread
+                                # This bypasses Kivy's Clock and works even when main thread is suspended
+                                print(f"[Poll] ⚡ Triggering alert directly in background thread (bypassing Clock)")
+                                self.trigger_alert(subject, sender)
+
+                                # Also try to update UI (may fail if main thread suspended, but that's OK)
+                                try:
+                                    self.alert_count += 1
+                                    Clock.schedule_once(lambda dt, s=subject, f=sender: self.update_ui_after_alert(s, f))
+                                except Exception as e:
+                                    print(f"[Poll] UI update failed (expected on lockscreen): {e}")
 
                                 # Keep processed set size limited
                                 if len(processed_timestamps) > 100:
@@ -733,6 +746,22 @@ class EmailAlertApp(App):
 
         # Trigger alert
         self.trigger_alert(subject, sender)
+
+    def update_ui_after_alert(self, subject, sender):
+        """Update UI after alert (called via Clock.schedule_once, may fail if main thread suspended)"""
+        try:
+            self.count_label.text = f'Alerts: {self.alert_count}'
+
+            # Add to log
+            log_entry = f"\n[{datetime.now().strftime('%H:%M:%S')}]\n{subject}\n{sender}\n"
+            current_log = self.log_label.text
+            if current_log == 'No alerts yet':
+                self.log_label.text = log_entry
+            else:
+                self.log_label.text = log_entry + current_log
+            print(f"[UI] ✓ UI updated for alert: {subject}")
+        except Exception as e:
+            print(f"[UI] ✗ UI update failed: {e}")
 
     def trigger_alert(self, title, message):
         """Trigger sound and vibration"""
