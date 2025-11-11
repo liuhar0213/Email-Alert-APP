@@ -899,32 +899,26 @@ class EmailAlertApp(App):
             else:
                 print("[Wake] ✗ Wake lock not available!")
 
-            # TURN ON SCREEN and bring app to foreground (v3.3)
+            # Enhanced WakeLock for background alerts (v3.3)
+            # Keep CPU awake but don't bring app to foreground
             try:
                 from jnius import autoclass
-                Intent = autoclass('android.content.Intent')
+                PowerManager = autoclass('android.os.PowerManager')
                 PythonActivity = autoclass('org.kivy.android.PythonActivity')
-                WindowManager = autoclass('android.view.WindowManager')
 
                 activity = PythonActivity.mActivity
-                window = activity.getWindow()
+                context = activity.getApplicationContext()
+                power_manager = context.getSystemService(autoclass('android.content.Context').POWER_SERVICE)
 
-                # Add flags to turn on screen and show app over lockscreen
-                window.addFlags(WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
-                window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED)
-                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                window.addFlags(WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD)
+                # Check if screen is already on
+                is_screen_on = power_manager.isInteractive()
+                print(f"[Screen] Screen state: {'ON' if is_screen_on else 'OFF'}")
 
-                # Bring app to foreground by restarting activity
-                intent = Intent(activity, PythonActivity)
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-                activity.startActivity(intent)
+                # Just ensure WakeLock is working - don't force screen on
+                print("[Alert] Using WakeLock to keep CPU active for alarm playback")
 
-                print("[Screen] ✓ Screen turned ON, app brought to FOREGROUND")
             except Exception as e:
-                print(f"[Screen] ✗ Failed to wake screen: {e}")
+                print(f"[Screen] Screen check error: {e}")
 
             # Request audio focus (CRITICAL for vivo)
             if self.audio_manager:
