@@ -545,11 +545,11 @@ class EmailAlertApp(App):
             self.poll_thread.start()
             print("[Init] Started SSE + Polling hybrid mode for vivo")
 
-            # Start watchdog to auto-restart dead threads (check every 30 seconds)
+            # Start watchdog to auto-restart dead threads (check every 10 seconds for faster recovery)
             if self.watchdog_event:
                 self.watchdog_event.cancel()
-            self.watchdog_event = Clock.schedule_interval(self.check_threads, 30)
-            print("[Watchdog] Started thread monitor (30s interval)")
+            self.watchdog_event = Clock.schedule_interval(self.check_threads, 10)
+            print("[Watchdog] Started thread monitor (10s interval - v3.4 faster recovery)")
         else:
             self.running = False
             self.connected = False
