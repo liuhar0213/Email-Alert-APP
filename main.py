@@ -77,9 +77,9 @@ class EmailAlertApp(App):
         self.alert_active = False
 
         # Configuration
-        self.alert_duration = 70  # seconds
+        self.alert_duration = 180  # seconds (v3.6: extended default duration)
         self.custom_ringtone_path = None
-        self.poll_interval = 10  # seconds (v3.2: optimized for lower latency)
+        self.poll_interval = 7  # seconds (v3.6: moderate optimization - reduces latency by ~3s)
 
         # Foreground service
         self.notification_id = 1
@@ -92,6 +92,44 @@ class EmailAlertApp(App):
         self.alarm_manager = None
         self.alarm_intent = None
         self.reschedule_event = None  # v3.5: for auto-rescheduling Doze-resistant alarms
+
+        # Load saved settings
+        self.load_settings()
+
+    def load_settings(self):
+        """Load settings from JSON file (v3.6: persistent config)"""
+        try:
+            import json
+            from pathlib import Path
+            settings_file = Path.home() / '.email_alert_settings.json'
+            if settings_file.exists():
+                with open(settings_file, 'r') as f:
+                    settings = json.load(f)
+                    self.server_url = settings.get('server_url', 'http://10.0.0.170:8080')
+                    self.alert_duration = settings.get('alert_duration', 180)
+                    print(f"[Settings] Loaded: server={self.server_url}, duration={self.alert_duration}s")
+            else:
+                self.server_url = 'http://10.0.0.170:8080'
+                print("[Settings] Using defaults")
+        except Exception as e:
+            print(f"[Settings] Load failed: {e}, using defaults")
+            self.server_url = 'http://10.0.0.170:8080'
+
+    def save_settings(self):
+        """Save settings to JSON file (v3.6: persistent config)"""
+        try:
+            import json
+            from pathlib import Path
+            settings = {
+                'server_url': self.server_url,
+                'alert_duration': self.alert_duration
+            }
+            settings_file = Path.home() / '.email_alert_settings.json'
+            with open(settings_file, 'w') as f:
+                json.dump(settings, f)
+            print(f"[Settings] Saved: {settings}")
+        except Exception as e:
+            print(f"[Settings] Save failed: {e}")
 
     def build(self):
         """Build the UI"""
@@ -130,7 +168,7 @@ class EmailAlertApp(App):
         url_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=55, spacing=10)
         url_layout.add_widget(Label(text='Server:', size_hint_x=0.25, color=(1, 1, 1, 1)))
         self.url_input = TextInput(
-            text='http://10.0.0.170:8080',
+            text=self.server_url,  # v3.6: load from saved settings
             multiline=False,
             size_hint_x=0.75
         )
@@ -393,6 +431,7 @@ class EmailAlertApp(App):
         self.alert_duration = int(value)
         self.duration_value_label.text = f'{self.alert_duration}s'
         print(f"[Config] Alert duration set to {self.alert_duration}s")
+        self.save_settings()  # v3.6: save on change
 
     def select_ringtone(self, instance):
         """Open file picker for custom ringtone"""
@@ -531,6 +570,9 @@ class EmailAlertApp(App):
             self.connect_btn.text = 'Disconnect'
             self.connect_btn.background_color = (0.8, 0.2, 0.2, 1)
             self.update_status("Connecting...", (1, 0.8, 0, 1))
+
+            # v3.6: Save settings on successful connection
+            self.save_settings()
 
             # CRITICAL: Start foreground service to prevent vivo from killing app
             if ANDROID_AVAILABLE:
