@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.emailmonitor.emailalert">
+
+    <!-- 个推 SDK 所需权限 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <application>
+        <!-- 个推推送服务 -->
+        <service
+            android:name="com.emailmonitor.emailalert.GetuiService"
+            android:exported="false"
+            android:label="GetuiService"
+            android:process=":pushservice" />
+
+        <!-- 个推核心服务 -->
+        <service
+            android:name="com.igexin.sdk.PushService"
+            android:exported="true"
+            android:label="NotificationCenter"
+            android:process=":pushservice">
+            <intent-filter>
+                <action android:name="com.igexin.sdk.action.service.message" />
+            </intent-filter>
+        </service>
+
+        <!-- 个推下载服务 -->
+        <service
+            android:name="com.igexin.sdk.PushServiceUser"
+            android:exported="true"
+            android:label="NotificationCenterUser" />
+
+        <!-- 个推广播接收器 -->
+        <receiver
+            android:name="com.igexin.sdk.PushReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.net.conn.CONNECTIVITY_CHANGE" />
+                <action android:name="android.intent.action.USER_PRESENT" />
+                <action android:name="com.igexin.sdk.action.refreshls" />
+            </intent-filter>
+        </receiver>
+
+        <!-- 个推元数据 (已在 buildozer.spec 中配置，这里作为备份) -->
+        <meta-data
+            android:name="com.igexin.sdk.appid"
+            android:value="mQM6bHMbLlAQzfy53obHVB" />
+        <meta-data
+            android:name="com.igexin.sdk.appkey"
+            android:value="tldyUidqkC9KDQQ1tZ9SK8" />
+        <meta-data
+            android:name="com.igexin.sdk.appsecret"
+            android:value="hFE42eKXNN7rabpB9LKsH4" />
+    </application>
+
+</manifest>
