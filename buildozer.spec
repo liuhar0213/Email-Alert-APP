@@ -5,7 +5,7 @@ package.name = emailalert
 package.domain = com.emailmonitor
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,wav,mp3
-version = 3.6
+version = 3.7
 
 requirements = python3,kivy,requests
 

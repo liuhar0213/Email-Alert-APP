@@ -105,15 +105,15 @@ class EmailAlertApp(App):
             if settings_file.exists():
                 with open(settings_file, 'r') as f:
                     settings = json.load(f)
-                    self.server_url = settings.get('server_url', 'http://10.0.0.170:8080')
+                    self.server_url = settings.get('server_url', 'http://10.0.0.170')
                     self.alert_duration = settings.get('alert_duration', 180)
                     print(f"[Settings] Loaded: server={self.server_url}, duration={self.alert_duration}s")
             else:
-                self.server_url = 'http://10.0.0.170:8080'
+                self.server_url = 'http://10.0.0.170'
                 print("[Settings] Using defaults")
         except Exception as e:
             print(f"[Settings] Load failed: {e}, using defaults")
-            self.server_url = 'http://10.0.0.170:8080'
+            self.server_url = 'http://10.0.0.170'
 
     def save_settings(self):
         """Save settings to JSON file (v3.6: persistent config)"""
