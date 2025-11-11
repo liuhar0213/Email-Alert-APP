@@ -899,6 +899,33 @@ class EmailAlertApp(App):
             else:
                 print("[Wake] ✗ Wake lock not available!")
 
+            # TURN ON SCREEN and bring app to foreground (v3.3)
+            try:
+                from jnius import autoclass
+                Intent = autoclass('android.content.Intent')
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                WindowManager = autoclass('android.view.WindowManager')
+
+                activity = PythonActivity.mActivity
+                window = activity.getWindow()
+
+                # Add flags to turn on screen and show app over lockscreen
+                window.addFlags(WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
+                window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED)
+                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                window.addFlags(WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD)
+
+                # Bring app to foreground by restarting activity
+                intent = Intent(activity, PythonActivity)
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                activity.startActivity(intent)
+
+                print("[Screen] ✓ Screen turned ON, app brought to FOREGROUND")
+            except Exception as e:
+                print(f"[Screen] ✗ Failed to wake screen: {e}")
+
             # Request audio focus (CRITICAL for vivo)
             if self.audio_manager:
                 try:
