@@ -39,8 +39,8 @@ public class GetuiService extends GTIntentService {
 
                 // 解析 JSON
                 JSONObject json = new JSONObject(jsonStr);
-                String subject = json.optString("subject", "Email Alert");
-                String from = json.optString("from", "Unknown");
+                final String subject = json.optString("subject", "Email Alert");
+                final String from = json.optString("from", "Unknown");
 
                 // 调用 Python 的静态方法触发警报
                 PythonActivity activity = (PythonActivity) PythonActivity.mActivity;

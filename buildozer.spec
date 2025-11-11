@@ -17,6 +17,9 @@ android.archs = arm64-v8a
 # 个推 SDK Gradle 依赖
 android.gradle_dependencies = com.getui:gtsdk:3.2.13.0,com.getui:gtc:3.1.10.0
 
+# 个推 Maven 仓库
+android.add_gradle_repositories = maven { url 'https://mvn.getui.com/nexus/content/repositories/releases/' }
+
 # Java 源代码路径
 android.add_src = src
 
