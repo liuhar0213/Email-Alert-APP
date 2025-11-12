@@ -4,12 +4,19 @@ title = Email Alert
 package.name = emailalert
 package.domain = com.emailmonitor
 source.dir = .
-source.include_exts = py,png,jpg,kv,atlas,wav,mp3
-version = 3.7
+source.include_exts = py,png,jpg,kv,atlas,wav,mp3,java
+version = 4.0
 
 requirements = python3,kivy,requests
 
-android.permissions = INTERNET,VIBRATE,WAKE_LOCK,FOREGROUND_SERVICE,POST_NOTIFICATIONS,USE_FULL_SCREEN_INTENT,SCHEDULE_EXACT_ALARM,REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+android.permissions = INTERNET,VIBRATE,WAKE_LOCK,FOREGROUND_SERVICE,POST_NOTIFICATIONS,USE_FULL_SCREEN_INTENT,SCHEDULE_EXACT_ALARM,REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,BIND_NOTIFICATION_LISTENER_SERVICE
+android.add_src = .
+android.add_jars =
+android.manifest.intent_filters =
+android.manifest.launch_mode = standard
+p4a.bootstrap = sdl2
+android.presplash_color = #000000
+android.manifest_placeholders = notificationListenerPermission:android.permission.BIND_NOTIFICATION_LISTENER_SERVICE
 android.api = 29
 android.minapi = 21
 android.archs = arm64-v8a
